@@ -1,0 +1,2 @@
+import {listHistory,owner,routeError,AppError} from '@/lib/store';
+export async function GET(req:Request){try{const url=new URL(req.url),id=url.searchParams.get('id'),before=url.searchParams.get('before');if(!id)throw new AppError('Flow ID is required');if(before&&(!Number.isInteger(Number(before))||Number(before)<1))throw new AppError('Invalid history cursor');return Response.json(await listHistory(await owner(),id,before?Number(before):undefined));}catch(e){return routeError(e);}}

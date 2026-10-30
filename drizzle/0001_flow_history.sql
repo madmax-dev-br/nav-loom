@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS flow_history (owner TEXT NOT NULL, flow_id TEXT NOT NULL, revision INTEGER NOT NULL, document TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (owner, flow_id, revision));

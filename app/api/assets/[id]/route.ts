@@ -1,0 +1,3 @@
+import {env} from 'cloudflare:workers';
+import {AppError,owner,routeError} from '@/lib/store';
+export async function GET(req:Request,context:{params:Promise<{id:string}>}){try{const user=await owner();const {id}=await context.params;if(!env.DB||!env.BUCKET)throw new AppError('Screenshot storage is unavailable',503);const row=await env.DB.prepare('SELECT mime FROM assets WHERE id = ? AND owner = ?').bind(id,user).first<{mime:string}>();if(!row)throw new AppError('Screenshot not found',404);const file=await env.BUCKET.get(id);if(!file)throw new AppError('Screenshot not found',404);return new Response(file.body,{headers:{'Content-Type':row.mime,'Cache-Control':'private, max-age=3600','X-Content-Type-Options':'nosniff'}});}catch(e){return routeError(e);}}

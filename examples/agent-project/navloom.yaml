@@ -1,0 +1,42 @@
+version: 2
+kind: navloom-agent-project
+id: navloom-lab
+name: Navloom Lab
+description: Local web and Android applications for repeatable navigation tests.
+repositories:
+  - id: android-lab
+    path: ../android-test-app
+    description: Compose application and local API
+targets:
+  web:
+    platform: web
+    url: http://127.0.0.1:4790
+    origins: [http://127.0.0.1:4790]
+    browser: chromium
+    headless: true
+    viewport: {width: 1280, height: 800}
+    buildId: navloom-web-fixture-v1
+  android:
+    platform: android
+    serial: emulator-5554
+    package: dev.navloom.testapp
+    activity: .MainActivity
+    adb: adb
+    reset:
+      executable: node
+      args: [../android-test-app/server/reset.mjs, --serial, emulator-5554]
+      cwd: .
+      timeoutMs: 30000
+profiles:
+  default:
+    description: Local test account
+    secrets:
+      password: NAVLOOM_TEST_PASSWORD
+limits: {steps: 100, minutes: 30}
+permissions:
+  actions: [open, click, fill, scroll, back, wait, deeplink, reset]
+  deeplinkPrefixes: [http://127.0.0.1:4790/, 'navloomlab://app/']
+  pluginCapabilities: [read_graph, deeplink]
+  pluginImages: [node:22-alpine]
+skills: [.navloom/skills/explore.md]
+plugins: [.navloom/plugins/deeplinks/plugin.yaml]

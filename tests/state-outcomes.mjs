@@ -1,0 +1,7 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {createRequire} from 'node:module';
+const result=await build({entryPoints:['lib/variations.ts'],bundle:true,platform:'node',format:'cjs',write:false});const module={exports:{}};new Function('require','module','exports',Buffer.from(result.outputFiles[0].contents).toString())(createRequire(import.meta.url),module,module.exports);
+const {destinationStates,contextForState,variationFor,actionEffect}=module.exports;
+const screen={id:'payment',variants:{web:{screenshot:'ready',sources:[],apis:[],tests:[],variations:[{id:'declined',name:'Declined',when:{declined:true},screenshot:'error'},{id:'empty',name:'Empty',when:{empty:true},screenshot:'empty'}]}}};
+assert.deepEqual(destinationStates(screen,'web').map(s=>s.id),['default','declined','empty']);const before={declined:true,empty:true,customer:'returning'},ready=contextForState(screen,'web','default',before);assert.deepEqual(ready,{customer:'returning'});assert.deepEqual(before,{declined:true,empty:true,customer:'returning'});assert.equal(variationFor(screen.variants.web,ready),'default');const error=contextForState(screen,'web','declined',ready);assert.equal(variationFor(screen.variants.web,error),'declined');assert.equal(actionEffect({from:'product',to:'cart',type:'internal'}),'Navigation');assert.equal(actionEffect({from:'payment',to:'payment',type:'tap'}),'State change');console.log('Outcome branches, condition replacement, and action effects passed.');

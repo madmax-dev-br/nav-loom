@@ -1,0 +1,16 @@
+version: 1
+sdk: 1
+id: deeplinks
+name: Screen deeplinks
+capabilities: [read_graph, deeplink]
+fields:
+  - key: deeplink
+    label: Deeplink
+    type: url
+component: component.html
+server:
+  image: node:22-alpine
+  entry: server.mjs
+tools:
+  - name: describe
+    description: Summarize configured deeplink coverage without network access.

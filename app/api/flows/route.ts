@@ -1,0 +1,3 @@
+import {listFlows,saveFlow,owner,routeError,sameOrigin,AppError} from '@/lib/store';
+export async function GET(){try{return Response.json({flows:await listFlows(await owner())});}catch(e){return routeError(e);}}
+export async function POST(req:Request){try{sameOrigin(req);const user=await owner();if(Number(req.headers.get('content-length'))>1500000)throw new AppError('Flow exceeds the size limit');const body=await req.text();if(body.length>1500000)throw new AppError('Flow exceeds the size limit');const p=JSON.parse(body);if(!Number.isInteger(p.revision)||p.revision<0)throw new AppError('A nonnegative revision is required');return Response.json(await saveFlow(user,p.flow,p.revision));}catch(e){return routeError(e);}}

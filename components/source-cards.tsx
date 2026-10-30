@@ -1,0 +1,5 @@
+"use client";
+import {ArrowUpRight,FileCode2} from 'lucide-react';
+import {repositoryById,type Repository,type Source} from '@/lib/repositories';
+import type {Flow,Screen} from '@/lib/flow';
+export function SourceCards({sources,repository,onOpen,flow,repositoryId,onAssign}:{sources:Screen['variants'][string]['sources'];repository:Flow['repository'];onOpen:(path:string,repository?:Repository,source?:Source,assign?:(repository:string|undefined)=>void)=>void;flow?:Flow;repositoryId?:string;onAssign?:(index:number,repository:string|undefined)=>void}){return <>{sources.map((source,i)=>{const resolved=flow?repositoryById(flow,source.repository??repositoryId):repository;return <button className="endpoint source-link-card" key={`${source.path}-${i}`} aria-label={`Open source: ${source.path}`} onClick={()=>onOpen(source.path,resolved,source,onAssign?id=>onAssign(i,id):undefined)}><FileCode2 size={15}/><strong>{source.path.split('/').pop()}</strong><small className={`status-${source.status}`}>{source.status==='unchanged'?'Verified':source.status==='unverified'?'Unverified':source.status}</small><ArrowUpRight size={14}/></button>;})}</>;}

@@ -1,0 +1,11 @@
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';import {createInterface} from 'node:readline';import {writeFile,mkdir} from 'node:fs/promises';import {fileURLToPath} from 'node:url';
+const root=fileURLToPath(new URL('../../../',import.meta.url));await mkdir(root+'/examples/android-test-app/verification',{recursive:true});const client=new Client({name:'navloom-adaptive-explorer',version:'1'});await client.connect(new StdioClientTransport({command:process.execPath,args:[root+'/scripts/agent-mcp.mjs',root+'/examples/agent-project']}));
+let runId;const tool=async(name,args={})=>{const r=await client.callTool({name:'navloom_'+name,arguments:args});const text=r.content.find(c=>c.type==='text')?.text;if(r.isError)throw Error(text);return JSON.parse(text);};
+function summary(r){
+ if(Array.isArray(r))return r.map(summary);if(!r||typeof r!=='object')return r;
+ const out={};for(const [k,v] of Object.entries(r)){if(['xml','diagnostics','logs','config','identity','bounds','version','capabilities','repositories','checks'].includes(k))continue;
+ if(k==='elements'){out.elements=v.filter(e=>e.actions?.length).map(e=>({id:e.id,name:e.name,resourceId:e.resourceId,actions:e.actions,disabled:e.disabled}));}
+ else if(k==='observations')out.observation=summary(v.at(-1));else if(k==='steps')out.steps=v.length;else if(k==='graph')out.graph={screens:v.screens?.length,states:v.states?.length,transitions:v.transitions?.length};else if(k==='runs')out.runs=v.map(x=>({id:x.id,status:x.status,objective:x.objective}));else if(k==='frontier')out.frontierCount=v.length;else out[k]=summary(v);
+ }return out;
+}
+console.log('READY: send JSON {name,args}. $run resolves to current mission.');for await(const line of createInterface({input:process.stdin})){try{const {name,args={}}=JSON.parse(line);if(name==='close'){await client.close();break;}if(args.runId==='$run')args.runId=runId;const r=await tool(name,args);if(name==='start'||name==='resume')runId=r.id??args.runId;await writeFile(root+'/examples/android-test-app/verification/adaptive-last-result.json',JSON.stringify(r,null,2));console.log(JSON.stringify(summary(r)));}catch(e){console.log(JSON.stringify({error:e.message}));}}

@@ -1,0 +1,37 @@
+version: 2
+kind: navloom-agent-project
+id: navloom-android-lab
+name: Navloom Android Lab
+description: Aplicativo Compose de teste com loja, Pix e cartões, conectado somente ao mock local.
+repositories:
+  - id: android-lab
+    path: .
+    description: Código Compose e servidor mock da mesma aplicação.
+targets:
+  android:
+    platform: android
+    serial: emulator-5554
+    package: dev.navloom.testapp
+    activity: .MainActivity
+    adb: adb
+    buildId: android-lab-1.0.0
+profiles:
+  default:
+    description: Ana Teste, conta demo local; senha indicada pela variável NAVLOOM_LAB_PASSWORD.
+    secrets:
+      password: NAVLOOM_LAB_PASSWORD
+reset:
+  executable: node
+  args: [server/reset.mjs, --serial, emulator-5554]
+  cwd: .
+  timeoutMs: 30000
+limits:
+  steps: 150
+  minutes: 20
+permissions:
+  actions: [open, click, fill, scroll, back, deeplink, wait, reset]
+  deeplinkPrefixes: ["navloomlab://app/"]
+  pluginCapabilities: [read_graph, read_sources, deeplink, reset]
+  pluginImages: []
+skills: []
+plugins: []

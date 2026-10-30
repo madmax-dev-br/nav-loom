@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+import {createService} from '../../agent/service.mjs';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
+test('authenticated loopback service and real MCP stdio discovery',async t=>{const root=await mkdtemp(join(tmpdir(),'navloom-service-')),service=await createService({root,port:0});t.after(async()=>{await service.close();await rm(root,{recursive:true,force:true});});const url=`http://127.0.0.1:${service.port}`;assert.equal((await fetch(url+'/health')).status,401);assert.equal((await fetch(url+'/health',{headers:{authorization:'Bearer '+service.token,origin:'https://untrusted.test'}})).status,403);assert.equal((await fetch(url+'/health',{headers:{authorization:'Bearer '+service.token}})).status,200);
+ const client=new Client({name:'test-client',version:'1'});await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('scripts/agent-mcp.mjs'),root]}));t.after(()=>client.close());const tools=await client.listTools();assert.ok(tools.tools.some(t=>t.name==='navloom_start'));assert.ok(tools.tools.some(t=>t.name==='navloom_evidence'));const status=await client.callTool({name:'navloom_status',arguments:{}});const data=JSON.parse(status.content[0].text);assert.equal(data.service.version,2);assert.equal(data.config,null);await client.close();});

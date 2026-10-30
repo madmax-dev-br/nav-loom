@@ -1,0 +1,2 @@
+import {execFileSync} from 'node:child_process';
+const response=await fetch('http://127.0.0.1:4791/__admin/reset',{method:'POST'});if(!response.ok)throw Error('Reset failed');const serial=process.argv[process.argv.indexOf('--serial')+1];if(process.argv.includes('--serial')){if(!serial||!serial.match(/^[\w.:-]+$/))throw Error('Invalid device serial');execFileSync('adb',['-s',serial,'shell','am','force-stop','dev.navloom.testapp']);}console.log('Mock restored to seed data; requested Android process stopped.');

@@ -1,0 +1,9 @@
+"use client";
+import {useState} from 'react';
+import {ChevronDown,ChevronRight} from 'lucide-react';
+export function YamlEditor({value,onChange}:{value:string;onChange:(value:string)=>void}){
+ const [folded,setFolded]=useState<Set<string>>(new Set());
+ const lines=value.split('\n'),starts=lines.flatMap((line,index)=>/^\S[^:]*:/.test(line)?[index]:[]);if(starts[0]!==0)starts.unshift(0);
+ const sections=starts.map((start,index)=>{const end=starts[index+1]??lines.length,text=lines.slice(start,end).join('\n'),name=lines[start].split(':')[0]||'Configuration';return {start,end,text,name};});
+ return <div className="yaml-code-editor" role="group" aria-label="YAML configuration">{sections.map(section=>{const collapsible=section.end-section.start>1,closed=folded.has(section.name);return <section key={section.name} className="yaml-code-section">{collapsible&&<button className="yaml-fold" aria-label={`${closed?'Expand':'Collapse'} ${section.name}`} aria-expanded={!closed} onClick={()=>setFolded(previous=>{const next=new Set(previous);if(closed)next.delete(section.name);else next.add(section.name);return next;})}>{closed?<ChevronRight size={13}/>:<ChevronDown size={13}/>}<strong>{section.name}</strong><small>{section.end-section.start} lines</small></button>}{closed?<div className="yaml-folded-line"><span>{section.start+1}</span><code>{lines[section.start]} …</code></div>:<div className="yaml-edit-block"><div className="yaml-line-numbers" aria-hidden="true">{lines.slice(section.start,section.end).map((_,index)=><span key={index}>{section.start+index+1}</span>)}</div><textarea aria-label={`YAML ${section.name}`} value={section.text} rows={section.end-section.start} wrap="off" spellCheck={false} onChange={e=>onChange([...lines.slice(0,section.start),...e.target.value.split('\n'),...lines.slice(section.end)].join('\n'))}/></div>}</section>})}</div>;
+}
