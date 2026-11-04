@@ -55,6 +55,8 @@ private suspend fun request(base: String, path: String, token: String, method: S
         if (token.isNotBlank()) connection.setRequestProperty("Authorization", "Bearer $token")
         if (body != null) { connection.doOutput = true; connection.outputStream.use { it.write(body.toString().toByteArray()) } }
         val status = connection.responseCode
+        // One line per request so Navloom can attribute API calls to interactions from logcat.
+        android.util.Log.i("NavloomLab", "$method $path -> $status")
         val text = (if (status in 200..299) connection.inputStream else connection.errorStream)?.bufferedReader()?.use { it.readText() } ?: "{}"
         val result = JSONObject(text)
         if (status !in 200..299) { android.util.Log.e("NavloomLab", "HTTP $status $path"); throw IllegalStateException(result.optString("error", "Falha HTTP $status")) }
