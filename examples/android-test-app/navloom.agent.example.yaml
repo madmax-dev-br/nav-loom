@@ -33,5 +33,9 @@ permissions:
   deeplinkPrefixes: ["navloomlab://app/"]
   pluginCapabilities: [read_graph, read_sources, deeplink, reset]
   pluginImages: []
+map:
+  enabled: true
+  dir: navloom-map
+  screenshots: true
 skills: []
 plugins: []
