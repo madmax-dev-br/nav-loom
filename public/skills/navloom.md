@@ -125,6 +125,18 @@ Cada observação (`navloom_observe` ou o resultado de um passo) traz: elementos
 - Rotas: `navloom_route` planeja um caminho confirmado até um estado; `navloom_replay` o executa e para na primeira divergência. Para repetir um cenário exato use `scenarioRunId` com `startStep`/`endStep`.
 - Android: `back` numa tela raiz fecha o app; o Navloom relança e reporta falha recuperável, a missão continua. Entrada de texto por ADB só aceita ASCII.
 
+## 5a. Economia de tokens: trabalhe com o grafo textual, não com imagens
+
+Por padrão todas as respostas são compactas. Olhar capturas custa caro e quase nunca é necessário.
+
+- Cada observação e cada passo devolvem um `digest`: uma linha por nó da tela, de cima para baixo, com tipo (`btn`, `input`, `link`, `list`, `text`), rótulo, posição e tamanho em pixels, `#resource_id`, ações possíveis e o `id` para agir. Exemplo: `btn "Produtos" @80,500 920x140 #btn_products [click] id=3f2a…`. Planeje cliques e preenchimentos a partir dele; nunca peça a imagem para descobrir onde clicar.
+- O digest de cada estado fica salvo no projeto (`navloom_memory` → `knowledge.screens[].states[].digest`, `navloom_screen`, e `navloom-map/map.yaml`). Use-o para descrever telas e fluxos depois da exploração, sem reabrir capturas.
+- `navloom_run` devolve a narrativa da execução em uma linha por passo (tela/estado de origem, ação, resultado, tela/estado de destino, chamadas de API). Descreva fluxos a partir dela.
+- Explore em lotes com `navloom_explore` (`maxCandidates` 8–15) em vez de um `navloom_step` por vez: cada chamada a menos é contexto a menos.
+- Só use `navloom_evidence` quando o texto não bastar (cor, ícone sem rótulo, gráfico, erro visual). A imagem já vem reduzida e comprimida (`captures.modelWidth`, padrão 640 px); não peça `format: png` nem larguras maiores sem motivo.
+- `detail: full` existe em `observe`, `step`, `run`, `status`, `memory`, `frontier`, `transition`; use só quando precisar de um campo que a visão compacta não traz.
+- Não repita `navloom_status` ou `navloom_memory` a cada passo: leia uma vez no início e de novo só depois de mudanças grandes.
+
 ## 6. Pedir ajuda e usar o harness
 
 O agente deve reconhecer quando não tem condições de avançar: senha ou credencial, um dado que só uma pessoa conhece, uma decisão de negócio (posso concluir um pedido real?), uma pré-condição (saldo, conta criada) ou um problema de ambiente.

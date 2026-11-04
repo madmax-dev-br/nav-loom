@@ -1,7 +1,8 @@
 import {mkdir,readFile,writeFile,rename,access} from 'node:fs/promises';
 import {join} from 'node:path';
 import {parse,stringify} from 'yaml';
-import {decodePng,encodePng,scalePng} from './png.mjs';
+import {decodePng,scalePng} from './png.mjs';
+import {encodeJpeg} from './jpeg.mjs';
 import {endpointIndex} from './network.mjs';
 import {emptyGraph,uid} from './store.mjs';
 import {publicEntry} from './harness.mjs';
@@ -16,7 +17,7 @@ export function serializeMap(config,graph){
  const states=[...graph.states].sort(byTime),screens=[...graph.screens].sort(byTime),transitions=[...graph.transitions].sort((a,b)=>String(a.evidence?.[0]?.stepId??'').localeCompare(String(b.evidence?.[0]?.stepId??''))||a.id.localeCompare(b.id));
  return {version:1,kind:'navloom-map',project:{id:config.id,name:config.name,description:config.description},
   screens:screens.map(s=>({id:s.id,target:s.target,name:s.name,route:s.route,identity:s.identity,screenKey:s.screenKey??null,description:s.description||'',links:s.links??[],sources:s.sources??[],createdAt:s.createdAt})),
-  states:states.map(s=>({id:s.id,screenId:s.screenId,name:s.name,stateKey:s.stateKey??null,description:s.description||'',markers:s.markers??[],firstSeen:s.firstSeen,screenshot:s.thumbnail??null,hotspots:s.hotspots??[]})),
+  states:states.map(s=>({id:s.id,screenId:s.screenId,name:s.name,stateKey:s.stateKey??null,description:s.description||'',markers:s.markers??[],firstSeen:s.firstSeen,screenshot:s.thumbnail??null,digest:s.digest??null,hotspots:s.hotspots??[]})),
   transitions:transitions.map(t=>({id:t.id,signature:t.signature,from:t.from,to:t.to,kind:t.kind,outcome:t.outcome??null,name:t.name,action:t.action,target:t.target,profile:t.profile,preconditions:t.preconditions??{},version:t.version?{fingerprint:t.version.fingerprint}:null,confirmed:t.confirmed,cost:t.cost??1,summary:t.summary||'',description:t.description||'',network:t.network??[],diff:trimDiff(t.diff),imageChange:t.imageChange?{changedRatio:t.imageChange.changedRatio,region:t.imageChange.region}:null,evidence:t.evidence??[]})),
   deeplinks:(graph.deeplinks??[]).map(d=>({url:d.url,target:d.target,screenId:d.screenId,stateId:d.stateId,verifiedAt:d.verifiedAt,runId:d.runId,observationId:d.observationId})),
   endpoints:endpointIndex(graph).map(e=>({...e,links:graph.endpointLinks?.[`${e.method} ${e.path}`]??[]})),
@@ -30,7 +31,7 @@ export function renderMarkdown(map){
  lines.push('## Telas','');
  for(const s of map.screens){lines.push(`### ${s.name}`,'',`\`${s.route}\` · identidade ${s.identity} · alvo ${s.target}`,'');if(s.description)lines.push(s.description,'');
   const states=map.states.filter(x=>x.screenId===s.id);lines.push(`**Estados (${states.length})**`,'');
-  for(const st of states){lines.push(`- ${st.name}${st.markers?.length?` · ${st.markers.join(', ')}`:''}${st.description?` — ${st.description}`:''}`);if(st.screenshot)lines.push(`  ![${st.name}](${st.screenshot})`);
+  for(const st of states){lines.push(`- ${st.name}${st.markers?.length?` · ${st.markers.join(', ')}`:''}${st.description?` — ${st.description}`:''}`);if(st.screenshot)lines.push(`  ![${st.name}](${st.screenshot})`);if(st.digest)lines.push('  <details><summary>Grafo textual da tela</summary>','','  ```',...st.digest.split('\n').map(l=>'  '+l),'  ```','','  </details>');
    const out=map.transitions.filter(t=>t.from===st.id&&t.confirmed);for(const t of out){const dest=state(t.to),destScreen=dest?screen(dest.screenId):null;lines.push(`  - ${t.summary||t.name} → ${destScreen?.name??'?'}${dest&&dest.name!==destScreen?.name?` / ${dest.name}`:''}${t.network?.length?` · API: ${t.network.map(n=>`${n.method} ${n.path}${n.statuses.length?` (${n.statuses.join('/')})`:''}`).join(', ')}`:''}${t.description?`\n    - ${t.description}`:''}`);}}
   if(s.sources?.length)lines.push('',`Código: ${s.sources.map(l=>`\`${l.repository}:${l.path}${l.line?':'+l.line:''}\` (${l.role}, ${l.status})`).join(', ')}`);
   const links=map.deeplinks.filter(d=>d.screenId===s.id);if(links.length)lines.push('',`Deeplinks verificados: ${links.map(d=>`\`${d.url}\``).join(', ')}`);
@@ -44,8 +45,8 @@ export function renderMarkdown(map){
 async function atomic(file,data){const temp=`${file}.${uid()}.tmp`;await writeFile(temp,data);await rename(temp,file);}
 export async function exportMap(store,config,graph){
  const settings=config.map;if(!settings?.enabled)return null;const dir=join(store.root,settings.dir);await mkdir(join(dir,'states'),{recursive:true});
- if(settings.screenshots){for(const state of graph.states){if(state.thumbnail||!state.representative?.screenshot)continue;const file=`states/${state.id}.png`;try{await access(join(dir,file));state.thumbnail=file;continue;}catch{}
-  try{const image=scalePng(decodePng(await store.resource(state.representative.screenshot)),settings.thumbnailWidth);await atomic(join(dir,file),encodePng(image));state.thumbnail=file;}catch{/* evidence missing locally; the map keeps text only for this state */}}}
+ if(settings.screenshots){for(const state of graph.states){if(state.thumbnail||!state.representative?.screenshot)continue;const file=`states/${state.id}.jpg`;try{await access(join(dir,file));state.thumbnail=file;continue;}catch{}
+  try{const image=scalePng(decodePng(await store.resource(state.representative.screenshot)),settings.thumbnailWidth);await atomic(join(dir,file),encodeJpeg(image,settings.thumbnailQuality??70));state.thumbnail=file;}catch{/* evidence missing locally; the map keeps text only for this state */}}}
  const map=serializeMap(config,graph);await atomic(join(dir,'map.yaml'),stringify(map,{lineWidth:0}));await atomic(join(dir,'README.md'),renderMarkdown(map));return {dir,screens:map.screens.length,states:map.states.length,transitions:map.transitions.length,endpoints:map.endpoints.length,deeplinks:map.deeplinks.length};
 }
 /** Rebuild a graph from the committed map. Evidence references stay as recorded; they may not exist locally. */
@@ -53,7 +54,7 @@ export async function importMap(dir){
  const map=parse(await readFile(join(dir,'map.yaml'),'utf8'));if(map?.kind!=='navloom-map'||map.version!==1)throw Error('Unsupported map file');
  const graph=emptyGraph();
  graph.screens=map.screens.map(s=>({...s,sources:s.sources??[],links:s.links??[]}));
- graph.states=map.states.map(s=>({id:s.id,screenId:s.screenId,name:s.name,description:s.description??'',markers:s.markers??[],firstSeen:s.firstSeen,lastSeen:s.firstSeen,hotspots:s.hotspots??[],thumbnail:s.screenshot??null}));
+ graph.states=map.states.map(s=>({id:s.id,screenId:s.screenId,name:s.name,description:s.description??'',markers:s.markers??[],firstSeen:s.firstSeen,lastSeen:s.firstSeen,hotspots:s.hotspots??[],thumbnail:s.screenshot??null,digest:s.digest??null,stateKey:s.stateKey??null}));
  graph.transitions=map.transitions.map(t=>({...t,evidence:t.evidence??[],network:t.network??[],version:t.version??null,description:t.description??'',summary:t.summary??''}));
  graph.deeplinks=map.deeplinks??[];graph.harness=(map.harness??[]).map(h=>({...h,uses:[],resolvedBy:'user',remembered:true}));graph.endpointLinks=Object.fromEntries((map.endpoints??[]).filter(e=>e.links?.length).map(e=>[`${e.method} ${e.path}`,e.links]));graph.flows=(map.flows??[]).map(f=>({...f,updatedAt:null}));graph.imported={from:'map',at:new Date().toISOString()};
  return graph;

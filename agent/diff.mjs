@@ -1,7 +1,7 @@
 import {decodePng} from './png.mjs';
 /** Pixel comparison of two screenshots. Returns the normalized bounding box of what changed. */
 export function imageDiff(beforePng,afterPng,{threshold=40,step=2}={}){
- let a,b;try{a=decodePng(beforePng);b=decodePng(afterPng);}catch(e){return {comparable:false,reason:e.message};}
+ let a,b;try{a=Buffer.isBuffer(beforePng)?decodePng(beforePng):beforePng;b=Buffer.isBuffer(afterPng)?decodePng(afterPng):afterPng;if(!a?.pixels||!b?.pixels)throw Error('Image unavailable');}catch(e){return {comparable:false,reason:e.message};}
  if(a.width!==b.width||a.height!==b.height)return {comparable:false,reason:'Different image sizes',changedRatio:1,region:{x:0,y:0,width:1,height:1}};
  let sampled=0,changed=0,minX=Infinity,minY=Infinity,maxX=-1,maxY=-1;
  for(let y=0;y<a.height;y+=step)for(let x=0;x<a.width;x+=step){const o=(y*a.width+x)*4;sampled++;
