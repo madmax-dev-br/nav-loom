@@ -106,6 +106,12 @@ Para testar um fluxo específico, prefira `scenarioRunId` e o intervalo de passo
 - Deeplinks: o Android lista os intent filters do pacote instalado (`dumpsys package`), a Web lista links observados nas telas. Um deeplink só é **verificado** quando um passo `deeplink` observado registra a tela de destino.
 - iOS: alvo `ios` com simulador (`xcrun simctl`) para captura, abertura e deeplinks. Sem um driver XCUITest/WebDriverAgent, `interact` e `hierarchy` são reportados como ausentes em vez de simulados.
 
+## Respostas compactas e capturas comprimidas
+
+O serviço devolve ao agente, por padrão, um grafo textual da tela (`digest`): uma linha por nó com tipo, rótulo, posição e tamanho em pixels, `#resource_id`, ações e `id`. O XML da hierarquia, seletores e identidades nunca viajam pelo MCP. O digest de cada estado fica salvo no grafo e em `navloom-map/map.yaml`, para descrever telas e fluxos sem reabrir imagens. `navloom_run` vira uma narrativa de uma linha por passo. `detail: full` devolve os registros completos quando necessário.
+
+Capturas: o PNG original continua como evidência imutável, mas o site e o modelo recebem um JPEG reduzido (`captures.previewWidth`/`previewQuality`, `captures.modelWidth`), e as miniaturas do mapa são JPEG (`map.thumbnailQuality`). No Android, cada observação usa duas chamadas ADB (foco filtrado no aparelho e dump+cat em um shell) e um passo logo após a observação pula a checagem redundante de tela (`exploration.staleCheckMs`).
+
 ## Pedidos de ajuda e harness
 
 O agente deve reconhecer quando não tem condições de avançar. Cada observação traz `help.needs` (campos sensíveis e se o harness já conhece o `secretRef`) e `help.hints` (instruções lembradas para a tela). Quando falta algo que só uma pessoa sabe, o agente chama `navloom_ask` e espera com `navloom_await`; a pessoa responde no painel **Ajuda** da interface. A resposta entra no harness do projeto (`navloom-map/map.yaml`, seção `harness`) e as próximas execuções já a encontram: `navloom_ask` devolve `known` em vez de perguntar de novo. Segredos ficam apenas em `.navloom/secrets.json` (ignorado pelo git) e são usados por `secretRef`; o mapa guarda a referência, nunca o valor.
