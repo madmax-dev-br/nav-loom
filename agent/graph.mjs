@@ -7,13 +7,13 @@ export function identity(observation,target){
 }
 const HOTSPOT_LIMIT=80;
 /** Compact interactive candidates kept on the state so the map renders without local evidence files. */
-export function hotspots(observation){return observation.elements.filter(e=>e.actions?.length&&!e.disabled&&e.visible!==false&&e.bounds).slice(0,HOTSPOT_LIMIT).map(e=>({id:e.id,identity:e.identity,name:e.name,actions:e.actions,bounds:e.bounds,sensitive:!!e.sensitive}));}
+export function hotspots(observation){return observation.elements.filter(e=>e.actions?.length&&!e.disabled&&e.visible!==false&&e.bounds).slice(0,HOTSPOT_LIMIT).map(e=>({id:e.id,identity:e.identity,name:e.name,actions:e.actions,bounds:e.bounds,sensitive:!!e.sensitive,...(e.resourceId?{resourceId:e.resourceId}:{})}));}
 export function recordObservation(graph,observation,run){
  const keys=identity(observation,run.target);Object.assign(observation,keys);
  let screen=graph.screens.find(s=>s.id===keys.screenId);
- if(!screen){screen={id:keys.screenId,target:run.target,name:observation.heading||observation.title||observation.route,description:'',route:observation.route,identity:observation.screenKey?'explicit':'structural',sources:[],links:[],createdAt:now()};graph.screens.push(screen);}
+ if(!screen){screen={id:keys.screenId,target:run.target,name:observation.heading||observation.title||observation.route,description:'',route:observation.route,identity:observation.screenKey?'explicit':'structural',screenKey:observation.screenKey??null,sources:[],links:[],createdAt:now()};graph.screens.push(screen);}
  if(observation.links?.length){screen.links=[...new Set([...(screen.links??[]),...observation.links])].slice(0,100);}
- let state=graph.states.find(s=>s.id===keys.stateId);if(!state){state={id:keys.stateId,screenId:screen.id,name:observation.stateKey||observation.heading||'Observed state',description:'',firstSeen:observation.id,lastSeen:observation.id,markers:(observation.stateMarkers??[]).map(m=>Array.isArray(m)?m[0]:m).filter(Boolean)};graph.states.push(state);}state.lastSeen=observation.id;
+ let state=graph.states.find(s=>s.id===keys.stateId);if(!state){state={id:keys.stateId,screenId:screen.id,name:observation.stateKey||observation.heading||'Observed state',stateKey:observation.stateKey??null,description:'',firstSeen:observation.id,lastSeen:observation.id,markers:(observation.stateMarkers??[]).map(m=>Array.isArray(m)?m[0]:m).filter(Boolean)};graph.states.push(state);}state.lastSeen=observation.id;
  if(!state.hotspots?.length)state.hotspots=hotspots(observation);
  for(const element of observation.elements){if(!element.actions?.length||element.disabled)continue;const key=hash([observation.stateId,element.identity]);if(!run.frontier.some(f=>f.key===key))run.frontier.push({key,stateId:observation.stateId,elementIdentity:element.identity,label:element.name,actions:element.actions,status:'pending',observationId:observation.id,elementId:element.id,sensitive:!!element.sensitive,bounds:element.bounds});}
  return keys;

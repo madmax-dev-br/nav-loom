@@ -88,6 +88,8 @@ Principais operações:
 | `navloom_deeplinks` | Deeplinks declarados (intent filters), links observados, prefixos permitidos e deeplinks verificados |
 | `navloom_route`, `navloom_replay` | Planejar e reproduzir caminhos confirmados |
 | `navloom_annotate`, `navloom_describe`, `navloom_group_flow` | Descrições de negócio de telas, transições/estados/fluxos e agrupamentos |
+| `navloom_ask`, `navloom_await`, `navloom_help` | Pedir ajuda a uma pessoa quando não dá para avançar (senha, dado, decisão, pré-condição); a resposta vira harness e é lembrada |
+| `navloom_search_source`, `navloom_source_tree`, `navloom_link_suggestions`, `navloom_link` | Explorar os repositórios configurados e vincular telas ao frontend e endpoints ao backend |
 | `navloom_export_map` | Gravar o mapa versionável (`navloom-map/`) |
 | `navloom_finish`, `navloom_compare` | Verificações, diagnóstico e comparação |
 
@@ -99,6 +101,14 @@ Para testar um fluxo específico, prefira `scenarioRunId` e o intervalo de passo
 - Chamadas de API: na Web todas as requisições do navegador entre a ação e a captura seguinte; no Android as linhas de logcat do processo do app (OkHttp logging ou linhas como `GET /api/x -> 200`). Elas aparecem na transição, no painel **API** e no mapa versionado. São evidência do que o app pediu, não prova do comportamento do servidor.
 - Deeplinks: o Android lista os intent filters do pacote instalado (`dumpsys package`), a Web lista links observados nas telas. Um deeplink só é **verificado** quando um passo `deeplink` observado registra a tela de destino.
 - iOS: alvo `ios` com simulador (`xcrun simctl`) para captura, abertura e deeplinks. Sem um driver XCUITest/WebDriverAgent, `interact` e `hierarchy` são reportados como ausentes em vez de simulados.
+
+## Pedidos de ajuda e harness
+
+O agente deve reconhecer quando não tem condições de avançar. Cada observação traz `help.needs` (campos sensíveis e se o harness já conhece o `secretRef`) e `help.hints` (instruções lembradas para a tela). Quando falta algo que só uma pessoa sabe, o agente chama `navloom_ask` e espera com `navloom_await`; a pessoa responde no painel **Ajuda** da interface. A resposta entra no harness do projeto (`navloom-map/map.yaml`, seção `harness`) e as próximas execuções já a encontram: `navloom_ask` devolve `known` em vez de perguntar de novo. Segredos ficam apenas em `.navloom/secrets.json` (ignorado pelo git) e são usados por `secretRef`; o mapa guarda a referência, nunca o valor.
+
+## Vínculo com o código
+
+Com `repositories` configurados, `navloom_link_suggestions` busca no código os identificadores, rótulos e rota de uma tela (frontend) e os caminhos dos endpoints que ela dispara (backend), devolvendo candidatos com as linhas encontradas. O agente lê os arquivos (`navloom_source`, `navloom_search_source`) e confirma com `navloom_link`. Os vínculos aparecem no inspector da tela, na coluna **Backend** do painel de API e no mapa versionado. Vínculos inferidos são hipóteses; só o status `confirmed` indica leitura do código.
 
 ## Android de demonstração
 

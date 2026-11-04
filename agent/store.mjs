@@ -7,7 +7,7 @@ export const now=()=>new Date().toISOString();
 export const uid=()=>randomUUID();
 export const hash=value=>createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex').slice(0,24);
 export async function safePath(root,path){const base=await realpath(root);const file=await realpath(resolve(base,path));const rel=relative(base,file);if(rel.startsWith('..')||isAbsolute(rel))throw Error('Path is outside the configured root');return file;}
-export const emptyGraph=()=>({version:2,flows:[],screens:[],states:[],transitions:[],deeplinks:[],descriptions:[],legacy:[],extensions:{},presentation:{pinned:{},plugins:{}}});
+export const emptyGraph=()=>({version:2,flows:[],screens:[],states:[],transitions:[],deeplinks:[],harness:[],endpointLinks:{},descriptions:[],legacy:[],extensions:{},presentation:{pinned:{},plugins:{}}});
 export class Store{
  constructor(root){this.root=resolve(root);this.dir=join(this.root,'.navloom');this.graphFallback=null;}
  async init(){for(const path of ['runs','evidence','revisions','plugins','skills'])await mkdir(join(this.dir,path),{recursive:true});}
