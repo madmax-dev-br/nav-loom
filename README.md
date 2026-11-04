@@ -56,6 +56,10 @@ Abra [o workspace local](http://127.0.0.1:5173/signin-with-chatgpt?return_to=/ex
 
 O seletor **Projeto** troca projetos ou cria um novo Web/Android, com configuração, grafo e histórico separados. O serviço e o MCP precisam apontar para a mesma pasta indicada no painel. O editor visual anterior continua disponível em `/`.
 
+## Skill para o agente
+
+[`agent-skills/navloom/SKILL.md`](agent-skills/navloom/SKILL.md) explica o setup completo e a operação: pré-requisitos, `navloom.yaml`, serviço e interface, conexão MCP, exploração determinística, pedidos de ajuda e harness, API, deeplinks, vínculo com o código, descrições, o que versionar e as regras fixas. Instale no cliente do agente (por exemplo, copie a pasta para `.claude/skills/navloom/` no projeto ou em `~/.claude/skills/`) para que ele saiba como usar o Navloom antes de conectar.
+
 ## Conectar um agente por MCP
 
 Adicione ao cliente MCP, substituindo os caminhos pelos caminhos absolutos do seu checkout e projeto:
