@@ -62,6 +62,8 @@ O seletor **Projeto** troca projetos ou cria um novo Web/Android, com configura�
 
 ## Conectar um agente por MCP
 
+Por padrão o MCP expõe 22 ferramentas de núcleo com descrições curtas (cerca de 3,5 mil tokens por turno, contra 8,7 mil com tudo). `--tools=extended` ou `--tools=all` (ou `NAVLOOM_MCP_TOOLS`) ampliam o catálogo quando o agente precisa de sondagem unitária, reset, código, configuração ou plugins.
+
 Adicione ao cliente MCP, substituindo os caminhos pelos caminhos absolutos do seu checkout e projeto:
 
 ```json
@@ -114,7 +116,7 @@ Capturas: o PNG original continua como evidência imutável, mas o site e o mode
 
 ## Pedidos de ajuda e harness
 
-O agente deve reconhecer quando não tem condições de avançar. Cada observação traz `help.needs` (campos sensíveis e se o harness já conhece o `secretRef`) e `help.hints` (instruções lembradas para a tela). Quando falta algo que só uma pessoa sabe, o agente chama `navloom_ask` e espera com `navloom_await`; a pessoa responde no painel **Ajuda** da interface. A resposta entra no harness do projeto (`navloom-map/map.yaml`, seção `harness`) e as próximas execuções já a encontram: `navloom_ask` devolve `known` em vez de perguntar de novo. Segredos ficam apenas em `.navloom/secrets.json` (ignorado pelo git) e são usados por `secretRef`; o mapa guarda a referência, nunca o valor.
+O agente deve reconhecer quando não tem condições de avançar. Cada observação traz `help.needs` (campos sensíveis e se o harness já conhece o `secretRef`) e `help.hints` (instruções lembradas para a tela). Quando falta algo que só uma pessoa sabe, o agente chama `navloom_ask` e a pergunta aparece no próprio chat: em clientes com elicitation do MCP (Cursor, Claude Code) como formulário, respondido na hora; sem esse recurso, o agente pergunta em texto e repassa a resposta com `navloom_answer`. O painel **Ajuda** da interface continua disponível, com `navloom_await` para esperar. A resposta entra no harness do projeto (`navloom-map/map.yaml`, seção `harness`) e as próximas execuções já a encontram: `navloom_ask` devolve `known` em vez de perguntar de novo. Segredos ficam apenas em `.navloom/secrets.json` (ignorado pelo git) e são usados por `secretRef`; o mapa guarda a referência, nunca o valor.
 
 ## Vínculo com o código
 

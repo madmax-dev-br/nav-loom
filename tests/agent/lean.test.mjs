@@ -20,7 +20,7 @@ test('the digest is a deterministic text graph with pixel positions, ids for act
  assert.equal(digest(observation),digest(observation),'stable');
 });
 test('lean views drop XML, locators and identities but keep what is needed to act',()=>{
- const lean=leanObservation(observation);assert.equal(lean.xml,undefined);assert.ok(!JSON.stringify(lean).includes('identity'));assert.deepEqual(lean.candidates.map(c=>c.id),['e2','e3']);assert.deepEqual(compactElement(observation.elements[1]),{id:'e2',name:'Produtos',role:'Button',actions:['click'],box:[.074,.219,.852,.061],rid:'btn_products'});
+ const lean=leanObservation(observation);assert.equal(lean.xml,undefined);assert.equal(lean.candidates,undefined,'ids live in the digest; no duplicate candidate list by default');assert.equal(lean.actionable,2);assert.ok(!JSON.stringify(lean).includes('identity'));assert.deepEqual(leanObservation(observation,{candidates:true}).candidates.map(c=>c.id),['e2','e3']);assert.deepEqual(compactElement(observation.elements[1]),{id:'e2',name:'Produtos',role:'Button',actions:['click'],box:[.074,.219,.852,.061],rid:'btn_products'});
  assert.ok(JSON.stringify(lean).length<JSON.stringify(observation).length/3);
  const graph={screens:[{id:'S',name:'Início'}],states:[{id:'st',screenId:'S',name:'ready'}]};
  const run={id:'r',objective:'x',mode:'exploratory',target:'android',status:'completed',startedAt:'t',metrics:{},frontier:[{status:'pending'},{status:'visited'}],observations:[{id:'a',screenId:'S',stateId:'st',elements:[{id:'e2',name:'Produtos'}],capturedAt:'t'},{id:'b',screenId:'S',stateId:'st',elements:[],capturedAt:'t'}],steps:[{action:{type:'click',elementId:'e2'},before:'a',after:'b',status:'completed',outcome:'none',network:[{method:'GET',path:'/api/x',status:200}]}]};

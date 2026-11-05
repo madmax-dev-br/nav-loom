@@ -95,11 +95,13 @@ Abra `http://127.0.0.1:5173/signin-with-chatgpt?return_to=/explore` (login simul
 
 ## 4. Conectar o agente pelo MCP
 
-No cliente MCP (Claude Code, Cursor, etc.):
+No cliente MCP (Cursor, Claude Code, etc.):
 
 ```json
 {"mcpServers":{"navloom":{"command":"node","args":["/caminho/Navloom/scripts/agent-mcp.mjs","/caminho/absoluto/do/projeto"]}}}
 ```
+
+Por padrão o MCP expõe só o núcleo de ferramentas (22), porque cada definição vai para o modelo em todo turno. `--tools=extended` adiciona sondagem unitária, reset, código e vínculos; `--tools=all` inclui configuração e plugins (ou a variável `NAVLOOM_MCP_TOOLS`). A configuração do projeto é feita pela interface ou editando `navloom.yaml`.
 
 O serviço tem que estar rodando antes da conexão. Uma missão por projeto por vez. Se a conexão cair, a missão é pausada e pode ser retomada com `navloom_resume`.
 
@@ -143,8 +145,8 @@ O agente deve reconhecer quando não tem condições de avançar: senha ou crede
 
 1. Leia `help.needs` na observação. Se `known` e `secretRef` estiverem preenchidos, a resposta já existe: use `navloom_step` com `fill` e `secretRef`.
 2. Se não existir, chame `navloom_ask` com `kind` (`credential`, `input`, `decision`, `precondition`, `environment`, `other`), `question` clara, `why` (por que está bloqueado), `screenId`, `stateId`, `elementIdentity` e, para credenciais, um `secretRef` estável como `login_password`. Se o harness já tiver a resposta, o retorno é `known` e você a usa.
-3. Espere com `navloom_await` (até 10 minutos por chamada; chame de novo se continuar pendente). A pessoa responde no painel **Ajuda** da interface.
-4. Use a resposta: segredos somente via `secretRef` em `fill`; opções e instruções como orientação.
+3. A pergunta aparece no próprio chat. Em clientes com elicitation do MCP (Cursor, Claude Code), um formulário é exibido e `navloom_ask` já volta com `status: answered`. Se o cliente não tiver esse recurso, o retorno é `pending` com `howToAnswer`: faça a pergunta à pessoa no chat (com a ferramenta de pergunta do cliente, se houver, oferecendo as `options`), encerre o turno e, quando ela responder, chame `navloom_answer` com `requestId` e `value`, `option` ou `instruction` (`secret: true` para credenciais). O painel **Ajuda** da interface continua valendo como alternativa, com `navloom_await` para esperar.
+4. Use a resposta: segredos somente via `secretRef` em `fill`; opções e instruções como orientação. Uma senha digitada no chat fica no histórico do chat; por isso, para credenciais, prefira o formulário ou a interface quando disponíveis.
 
 O que é lembrado: pergunta, contexto e a referência da resposta entram no harness do projeto (`navloom-map/map.yaml`, seção `harness`) e aparecem em `navloom_memory` e `navloom_help`. Valores de segredos ficam apenas em `.navloom/secrets.json`, fora do git, e são redigidos de diagnósticos. Nas próximas execuções não pergunte de novo o que o harness já sabe.
 

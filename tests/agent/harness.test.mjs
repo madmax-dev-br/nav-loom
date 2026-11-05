@@ -32,7 +32,7 @@ test('the agent asks for a credential, a person answers, the secret stays local 
  assert.equal(asked.status,'pending');const again=await r.ask({runId:run.id,kind:'credential',question:'Qual é a senha da conta de teste?',screenId:entry.screenId,elementIdentity:'password'});assert.equal(again.request.id,asked.request.id,'duplicates collapse');
  assert.equal((await r.status()).requests.length,1);
  const waiting=await r.awaitAnswer({requestId:asked.request.id,timeoutMs:1200,intervalMs:100});assert.equal(waiting.status,'pending');
- await assert.rejects(r.answer({requestId:asked.request.id,value:'s3cret!'},'mcp-agent'),/Only a person/);
+ await assert.rejects(r.answer({requestId:asked.request.id,value:'s3cret!'},'mcp-agent'),/come from a person/,'an agent cannot answer on its own; it must relay a chat or form answer');
  const timer=setTimeout(()=>void r.answer({requestId:asked.request.id,value:'s3cret!'},'interface'),300);t.after(()=>clearTimeout(timer));
  const answered=await r.awaitAnswer({requestId:asked.request.id,timeoutMs:5000,intervalMs:100});assert.equal(answered.status,'answered');assert.deepEqual(answered.entry.answer,{type:'secretRef',secretRef:'login_password'});
  assert.match(await readFile(join(r.store.dir,'secrets.json'),'utf8'),/s3cret!/);
