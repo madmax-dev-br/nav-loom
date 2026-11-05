@@ -34,7 +34,7 @@ export class Harness{
  async pending(){return (await this.requests()).filter(r=>r.status==='pending');}
  async await({requestId,timeoutMs=120000,intervalMs=500}){const started=Date.now();for(;;){const request=(await this.requests()).find(r=>r.id===requestId);if(!request)throw Error('Unknown request');if(request.status!=='pending')return {status:request.status,request,entry:request.entry??null};if(Date.now()-started>=timeoutMs)return {status:'pending',request};await new Promise(r=>setTimeout(r,intervalMs));}}
  /** Only a person answers. The secret value never enters the graph or the map. */
- async answer(graph,{requestId,value,instruction,option,secret,remember=true,secretRef}){
+ async answer(graph,{requestId,value,instruction,option,secret,remember=true,secretRef,resolvedBy='interface'}){
   const requests=await this.requests(),request=requests.find(r=>r.id===requestId);if(!request)throw Error('Unknown request');if(request.status!=='pending')throw Error('Request already answered');
   const isSecret=secret??request.kind==='credential';let answer;
   if(isSecret){if(typeof value!=='string'||!value.length)throw Error('A secret answer needs a value');const ref=secretRef||request.secretRef||`help_${request.kind}_${request.id.slice(0,8)}`;if(!/^[a-zA-Z0-9][\w-]{0,60}$/.test(ref))throw Error('Invalid secret reference');await this.saveSecret(ref,value);answer={type:'secretRef',secretRef:ref};}
@@ -42,7 +42,7 @@ export class Harness{
   else if(instruction)answer={type:'instruction',value:instruction};
   else if(typeof value==='string')answer={type:'value',value};
   else throw Error('Provide value, instruction or option');
-  const entry={id:uid(),requestId:request.id,kind:request.kind,question:request.question,why:request.why,screenId:request.screenId,stateId:request.stateId,elementIdentity:request.elementIdentity,answer,resolvedAt:now(),resolvedBy:'user',remembered:remember,uses:[]};
+  const entry={id:uid(),requestId:request.id,kind:request.kind,question:request.question,why:request.why,screenId:request.screenId,stateId:request.stateId,elementIdentity:request.elementIdentity,answer,resolvedAt:now(),resolvedBy,remembered:remember,uses:[]};
   request.status='answered';request.answeredAt=entry.resolvedAt;request.entry=publicEntry(entry);await this.saveRequests(requests);
   if(remember){graph.harness??=[];graph.harness.push(entry);}
   return {request,entry:publicEntry(entry),graphChanged:remember};
