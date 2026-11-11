@@ -20,7 +20,7 @@ export function HarnessPanel({data,graph,busy,onReview}:{data?:Obj;graph:Obj;bus
  const apis=new Set<string>(graph.transitions.flatMap((t:Obj)=>(t.apis??[]).map(apiText)));
  const steps=runs.reduce((n,r)=>n+r.steps.length,0),reused=runs.reduce((n,r)=>n+(r.metrics?.replayedSteps??0),0);
  const matches=scripts.reduce((n,s)=>n+(s.stats?.matches??0),0),activeScripts=scripts.filter(s=>s.status==='active').length,waiting=scripts.filter(s=>s.status==='proposed').length;
- const targets=Object.values(config?.targets??{}) as Obj[],declared=Object.values(graph.deeplinks??{}).flat() as Obj[];
+ const targets=Object.values(config?.targets??{}) as Obj[],declared=Object.values(graph.declaredDeeplinks??{}).flat() as Obj[];
  const stages=[
   {icon:Bot,title:'Agente',text:'Um agente externo decide o que fazer e fala com o Navloom por MCP.',value:`${runs.length} ${runs.length===1?'missão':'missões'}`},
   {icon:Eye,title:'Observa',text:'O Navloom lê a tela do app e devolve só o que importa: elementos, texto e saídas conhecidas.',value:`${graph.screens.length} telas`},

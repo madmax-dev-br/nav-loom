@@ -218,3 +218,15 @@
 .walk-exchange details{margin-top:14px}.walk-exchange summary{cursor:pointer;font-size:12px;font-weight:500;color:var(--k-3d4d57)}.walk-headers{margin:8px 0 0;display:grid}.walk-headers>div{display:grid;grid-template-columns:minmax(120px,34%) 1fr;gap:12px;padding:5px 0;border-top:1px solid var(--k-edf1ef);font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}.walk-headers dt{color:var(--k-6b7a84)}.walk-headers dd{margin:0;overflow-wrap:anywhere}
 .agent-app .walk-copy{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;font-size:11px}.walk-modal-panel>footer{flex:none;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 20px;border-top:1px solid var(--k-e4e8ed);background:var(--k-fbfcfc)}.walk-modal-panel>footer small{font-size:11px;color:var(--k-6b7a84)}
 @media(max-width:900px){.walk-modal{padding:10px}.walk-exchange{grid-template-columns:1fr;overflow:auto}.walk-exchange>section{overflow:visible}.walk-exchange>section+section{border-left:0;border-top:1px solid var(--k-e4e8ed)}}
+
+/* Help requests, code links and the selected connection's summary. */
+.agent-nav-count{min-width:17px;height:17px;padding:0 5px;border-radius:9px;background:var(--k-f6e7c4);color:var(--k-7d5a14);font-size:10.5px;font-weight:600;line-height:17px;text-align:center;font-variant-numeric:tabular-nums}
+.help-list{display:grid;gap:12px}.help-request{display:grid;gap:8px;padding:14px 16px;border:1px solid var(--k-e1e8ec);border-radius:10px;background:var(--k-ffffff)}
+.help-request header{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--k-6b7a84)}.help-request header .harness-status{display:inline-flex;align-items:center;gap:4px}.help-request header time,.help-request header small{margin-left:auto;font-size:10.5px;font-variant-numeric:tabular-nums}
+.agent-app .help-screen{padding:2px 9px;border-radius:20px;font-size:11px;color:var(--k-235f7c)}.agent-app .help-forget{padding:5px 7px;display:inline-flex}
+.help-request h4{font-size:14px;font-weight:600;margin:0;text-wrap:pretty}.help-request p{margin:0;font-size:12.5px;line-height:1.6;color:var(--k-52636d);max-width:72ch}
+.help-request form{display:grid;gap:8px}.help-request textarea{min-height:64px;resize:vertical}.help-request footer,.help-options{display:flex;gap:8px;flex-wrap:wrap}
+.agent-edge-summary{font-size:11.5px!important;line-height:1.6;color:var(--k-3d4d57)}
+.agent-code-links{list-style:none;margin:0 0 8px;padding:0;display:grid;gap:6px}.agent-code-links li{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:center;padding:8px 10px;border:1px solid var(--k-e1e8ec);border-radius:9px;background:var(--k-ffffff)}
+.agent-details .agent-code-links code{color:var(--k-235f7c);font-size:11.5px;overflow-wrap:anywhere}.agent-code-links small{grid-column:1;font-size:10px;line-height:1.5;color:var(--k-6b7a84)}.agent-code-links span{grid-column:2;grid-row:1/3;display:flex;gap:6px}.agent-app .agent-code-links button{padding:5px 9px;font-size:11px;display:inline-flex;align-items:center}
+.agent-code-links.is-suggested{margin-top:8px}.agent-code-links.is-suggested li{border-style:dashed}

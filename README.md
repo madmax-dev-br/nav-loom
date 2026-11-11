@@ -8,10 +8,12 @@ O agente decide o que explorar. O serviço local executa as ações permitidas, 
 
 1. **Configure um projeto:** plataforma, endereço ou pacote Android, repositórios, perfil, permissões, reset e orçamento.
 2. **Conecte o agente:** ele consulta a memória do projeto e verifica as capacidades disponíveis.
-3. **Explore:** o executor identifica elementos pelo DOM/acessibilidade na Web ou pela hierarquia acessível do Android. Cada interação registra o contexto e as capturas antes/depois.
-4. **Organize:** telas e estados formam fluxos. As telas aparecem da esquerda para a direita pela primeira visita na execução selecionada. Descrições explicam a finalidade e as regras de negócio da tela.
+3. **Explore:** o executor identifica elementos pelo DOM/acessibilidade na Web ou pela hierarquia acessível do Android. Cada interação registra o contexto, as capturas antes/depois, o que mudou (texto, elementos, região da imagem), as chamadas de API disparadas e um resumo determinístico do efeito. `navloom_explore` percorre os candidatos pendentes em ordem estável e limitada; o agente decide formulários e caminhos de negócio.
+4. **Organize:** telas e estados formam fluxos. As telas aparecem da esquerda para a direita pela primeira visita na execução selecionada; setas partem do botão tocado e apontam para a nova tela ou para o novo estado, com a região alterada destacada. Descrições explicam a finalidade e as regras de negócio da tela e o que cada interação faz.
 5. **Reutilize:** uma missão focada pode reproduzir um trecho confirmado do grafo. Divergências interrompem a reprodução para recuperação localizada.
 6. **Confira:** resultados, verificações, logs e pendências ficam no histórico. Concluir uma navegação não equivale a passar um teste; sem assertions, o resultado é `not_verified`.
+
+Tudo que o serviço aprende é espelhado em texto no diretório `navloom-map/` do projeto (`map.yaml`, `README.md` e miniaturas dos estados), pronto para commit. Um checkout novo renderiza esse mapa na interface mesmo sem execuções ou evidências locais.
 
 Elementos detectados são candidatos. Uma transição só é confirmada depois de uma ação observada. Screenshots, estados e posições de scroll são registros distintos. A versão do aplicativo e a versão do código são registradas separadamente quando disponíveis; não se presume que um APK corresponda ao checkout.
 
@@ -54,7 +56,13 @@ Abra [o workspace local](http://127.0.0.1:5173/signin-with-chatgpt?return_to=/ex
 
 O seletor **Projeto** troca projetos ou cria um novo Web/Android, com configuração, grafo e histórico separados. O serviço e o MCP precisam apontar para a mesma pasta indicada no painel. O editor visual anterior continua disponível em `/`.
 
+## Skill para o agente
+
+[`agent-skills/navloom/SKILL.md`](agent-skills/navloom/SKILL.md) explica o setup completo e a operação: pré-requisitos, `navloom.yaml`, serviço e interface, conexão MCP, exploração determinística, pedidos de ajuda e harness, API, deeplinks, vínculo com o código, descrições, o que versionar e as regras fixas. Instale no cliente do agente (por exemplo, copie a pasta para `.claude/skills/navloom/` no projeto ou em `~/.claude/skills/`) para que ele saiba como usar o Navloom antes de conectar.
+
 ## Conectar um agente por MCP
+
+Por padrão o MCP expõe 26 ferramentas de núcleo com descrições curtas (cerca de 4 mil tokens por turno, contra mais de 9 mil com tudo). `--tools=extended` ou `--tools=all` (ou `NAVLOOM_MCP_TOOLS`) ampliam o catálogo quando o agente precisa de sondagem unitária, reset, comparação, código, configuração ou plugins.
 
 Adicione ao cliente MCP, substituindo os caminhos pelos caminhos absolutos do seu checkout e projeto:
 
@@ -81,13 +89,38 @@ Principais operações:
 | Operação | Finalidade |
 | --- | --- |
 | `navloom_memory`, `navloom_capabilities` | Contexto persistido e recursos da plataforma |
-| `navloom_start`, `navloom_observe`, `navloom_step` | Missão, captura e interação |
-| `navloom_frontier` | Ações descobertas ainda não visitadas |
+| `navloom_start`, `navloom_observe`, `navloom_step` | Missão, captura e interação (cada passo devolve `outcome`, diff, chamadas de API e resumo) |
+| `navloom_frontier`, `navloom_probe`, `navloom_explore` | Candidatos pendentes; sondar um candidato; exploração determinística limitada |
+| `navloom_deeplinks` | Deeplinks declarados (intent filters), links observados, prefixos permitidos e deeplinks verificados |
 | `navloom_route`, `navloom_replay` | Planejar e reproduzir caminhos confirmados |
-| `navloom_annotate`, `navloom_group_flow` | Descrições de negócio e agrupamentos |
+| `navloom_annotate`, `navloom_describe`, `navloom_group_flow` | Descrições de negócio de telas, transições/estados/fluxos e agrupamentos |
+| `navloom_ask`, `navloom_await`, `navloom_help` | Pedir ajuda a uma pessoa quando não dá para avançar (senha, dado, decisão, pré-condição); a resposta vira harness e é lembrada |
+| `navloom_search_source`, `navloom_source_tree`, `navloom_link_suggestions`, `navloom_link` | Explorar os repositórios configurados e vincular telas ao frontend e endpoints ao backend |
+| `navloom_export_map` | Gravar o mapa versionável (`navloom-map/`) |
 | `navloom_finish`, `navloom_compare` | Verificações, diagnóstico e comparação |
 
 Para testar um fluxo específico, prefira `scenarioRunId` e o intervalo de passos ao planejar a reprodução. Chegar ao mesmo recibo por outro caminho não prova que o fluxo solicitado foi executado.
+
+## Exploração determinística, API e deeplinks
+
+- `navloom_explore` toca candidatos clicáveis pendentes em ordem estável (de cima para baixo, da esquerda para a direita), classifica cada efeito como nova tela, mudança de estado, scroll ou sem mudança, e volta com `back` apenas quando abriu uma tela nova (nunca de telas já visitadas antes da origem, nem sem histórico no navegador). Campos sensíveis e rótulos que casam com `exploration.avoid` (sair, excluir…) ficam para o agente. Mudanças automáticas (fim de loading, redirecionamentos) são registradas como eventos automáticos.
+- Chamadas de API: na Web as chamadas `fetch`/XHR do navegador; no Android um proxy de gravação para backends alcançados por `adb reverse` e as linhas de logcat do processo do app (OkHttp, formatos ensinados por scripts aprendidos, ou linhas como `GET /api/x -> 200`). Elas aparecem na transição (`apis`), nos detalhes da tela, no Preview e no mapa versionado; um `GET` ao trocar de tela conta como carregamento da tela de destino. São evidência do que o app pediu, não prova do comportamento do servidor.
+- Deeplinks: o Android lista os intent filters do pacote instalado (`dumpsys package`), a Web lista links observados nas telas. Um deeplink só é **verificado** quando um passo `deeplink` observado registra a tela de destino.
+- iOS: alvo `ios` com simulador (`xcrun simctl`) para captura, abertura e deeplinks. Sem um driver XCUITest/WebDriverAgent, `interact` e `hierarchy` são reportados como ausentes em vez de simulados.
+
+## Respostas compactas e capturas comprimidas
+
+O serviço devolve ao agente, por padrão, uma visão curta da tela: elementos acionáveis com ids curtos e rótulos, texto visível, saídas já mapeadas e as chamadas de API do passo. Com `detail: "digest"` vem o grafo textual completo: uma linha por nó com tipo, rótulo, posição e tamanho em pixels, `#resource_id`, ações e `id`. O XML da hierarquia, seletores e identidades nunca viajam pelo MCP. O digest de cada estado fica salvo no grafo e em `navloom-map/map.yaml`, para descrever telas e fluxos sem reabrir imagens. `navloom_run` vira uma narrativa de uma linha por passo e `navloom_goto` chega a uma tela conhecida em uma chamada. `detail: full` devolve os registros completos quando necessário.
+
+Capturas: o PNG original continua como evidência imutável, mas o site e o modelo recebem um JPEG reduzido (`captures.previewWidth`/`previewQuality`, `captures.modelWidth`), e as miniaturas do mapa são JPEG (`map.thumbnailQuality`). No Android, cada observação usa uma chamada ADB (foco, hierarquia, teclado e fragment em um único shell) e um passo logo após a observação pula a checagem redundante de tela (`exploration.staleCheckMs`).
+
+## Pedidos de ajuda e harness
+
+O agente deve reconhecer quando não tem condições de avançar. Cada observação traz `needs` (campos sensíveis e, quando já houve resposta, o `secretRef`) e `remembered` (instruções lembradas para a tela). Quando falta algo que só uma pessoa sabe, o agente chama `navloom_ask` e a pergunta aparece no próprio chat: em clientes com elicitation do MCP (Cursor, Claude Code) como formulário, respondido na hora; sem esse recurso, o agente pergunta em texto e repassa a resposta com `navloom_answer`. O painel **Ajuda** da interface continua disponível, com `navloom_await` para esperar. A resposta entra no harness do projeto (`navloom-map/map.yaml`, seção `harness`) e as próximas execuções já a encontram: `navloom_ask` devolve `known` em vez de perguntar de novo. Segredos ficam apenas em `.navloom/secrets.json` (ignorado pelo git) e são usados por `secretRef`; o mapa guarda a referência, nunca o valor.
+
+## Vínculo com o código
+
+Com `repositories` configurados, `navloom_link_suggestions` busca no código os identificadores, rótulos e rota de uma tela (frontend) e os caminhos dos endpoints que ela dispara (backend), devolvendo candidatos com as linhas encontradas. O agente lê os arquivos (`navloom_source`, `navloom_search_source`) e confirma com `navloom_link`. Os vínculos aparecem nos detalhes da tela (onde uma pessoa confirma ou remove) e no mapa versionado. Vínculos inferidos são hipóteses; só o status `confirmed` indica leitura do código.
 
 ## Android de demonstração
 
@@ -130,7 +163,8 @@ Capturas e logs podem conter dados da aplicação. Use contas descartáveis e re
 
 | Pasta | Conteúdo |
 | --- | --- |
-| `agent/` | Serviço local, persistência, executores Web/ADB, MCP e plugins |
+| `agent/` | Serviço local, persistência, executores Web/ADB/iOS, diffs, rede, deeplinks, mapa versionável, MCP e plugins |
+| `navloom-map/` (no projeto) | Conhecimento do app em texto: telas, estados, transições, endpoints, deeplinks e miniaturas |
 | `app/explore/` | Workspace de projetos, mapa e histórico |
 | `components/agent-*` | Canvas, conexões e elementos interativos |
 | `examples/agent-project/` | Configuração, skill e plugin de deeplinks |

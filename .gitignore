@@ -56,6 +56,8 @@ tsconfig.tsbuildinfo
 **/.navloom/runtime.json
 **/.navloom/service.lock
 **/.navloom/graph.json
+**/.navloom/secrets.json
+**/.navloom/requests.json
 **/.navloom/plugins/versions/
 
 # Machine-specific tools, credentials and captured application data

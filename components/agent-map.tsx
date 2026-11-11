@@ -156,6 +156,8 @@ export function displayStates(ids:string[],observations:Obj[],graph:Obj,chosen:R
  const map=new Map<string,{states:Obj[];current?:Obj}>();
  for(const id of ids){const states:Obj[]=[];
   for(const o of observations){if(o.screenId!==id)continue;const known=states.find(x=>x.id===o.stateId);if(known)known.capture=o;else states.push({id:o.stateId,capture:o,name:graph.states.find((v:Obj)=>v.id===o.stateId)?.name||o.stateKey||'estado'});}
+  // A project opened from its versioned map has no local captures: states are drawn from the map's thumbnails and stored controls.
+  for(const record of graph.states)if(record.screenId===id&&record.thumbnail&&!states.some(x=>x.id===record.id))states.push({id:record.id,name:record.name||'estado',capture:{id:'map-'+record.id,stateId:record.id,screenId:id,screenshot:'map/'+record.thumbnail,elements:(record.hotspots??[]).map((h:Obj)=>({...h,visible:true})),capturedAt:'',fromMap:true}});
   // Different states can carry the same declared name (a form before and after typing); number them so each can be picked.
   for(const state of states){const same=states.filter(x=>x.name===state.name);state.label=same.length>1?`${state.name} · ${same.indexOf(state)+1}`:state.name;}
   // By default a screen shows its clean state: the most recently captured one that is neither scrolled nor covered by the keyboard.
@@ -175,7 +177,7 @@ export function AgentMap({graph,run,observations,screens,projectId,resetKey,visi
   // A deeplink can be opened from anywhere, so it is shown as an entry of its screen, not as a path from where it happened to be used.
   // The same control leading to the same screen from several states is one connection; it leaves from whichever of those states is on display.
   const merged=new Map<string,Obj>();
-  for(const route of screenRoutes(graph,run?.id,visibleKinds,ids) as Obj[]){
+  for(const route of (screenRoutes(graph,run?.id,visibleKinds,ids) as Obj[]).filter(route=>route.fromScreen!==route.toScreen)){
    if(route.actionType==='deeplink')continue;
    const key=[route.fromScreen,route.toScreen,route.actionType,control(route)].join('|'),same=merged.get(key),shown=display.get(route.fromScreen)?.current?.id===route.fromState;
    if(!same){merged.set(key,{...route,fromStates:[route.fromState],actionIds:[...route.actionIds],apis:[...route.apis],shown});continue;}
@@ -214,7 +216,7 @@ export function AgentMap({graph,run,observations,screens,projectId,resetKey,visi
   // With a flow on display, a tap that lands on a screen of another flow becomes an exit pointing out of the map.
   const exits:Obj[]=[];
   if(flowId){const shown=new Set(ids),names=new Map<string,string>(graph.screens.map((s:Obj)=>[s.id,s.name]));
-   for(const route of screenRoutes(graph,run?.id,['navigation'],graph.screens.map((s:Obj)=>s.id)) as Obj[]){
+   for(const route of (screenRoutes(graph,run?.id,['navigation'],graph.screens.map((s:Obj)=>s.id)) as Obj[]).filter(route=>route.fromScreen!==route.toScreen)){
     if(!shown.has(route.fromScreen)||shown.has(route.toScreen)||['back','deeplink'].includes(route.actionType))continue;
     for(const flow of graph.flows??[])if(flow.id!==flowId&&flow.screenIds.includes(route.toScreen)&&!exits.some(e=>e.exitFlow.id===flow.id&&e.fromScreen===route.fromScreen&&e.name===route.name))exits.push({...route,fromStates:[route.fromState],id:`exit-${route.id}-${flow.id}`,exitFlow:flow,direction:'exit',toName:names.get(route.toScreen)??'',fromName:names.get(route.fromScreen)??''});
    }}
@@ -232,7 +234,7 @@ export function AgentMap({graph,run,observations,screens,projectId,resetKey,visi
     <header className="map-card-head"><button className="map-card-title" onClick={()=>{onSelectEdge(null);onSelectScreen(id);}}><span>{index.get(id)}</span><strong>{s.name}</strong></button>
      {states.length>1?<select className="map-state-select" aria-label={`Estado exibido de ${s.name}`} title="Estado exibido desta tela" value={current?.id} onChange={event=>{onChooseState(id,event.target.value);onSelectEdge(null);}}>{states.map(state=><option key={state.id} value={state.id}>{state.label}</option>)}</select>:states.length===1&&states[0].name!=='estado'&&<span className="map-state-only" title="Único estado capturado">{clip(states[0].label,14)}</span>}</header>
     {o?<div className="map-shot"><div className="agent-image" data-capture={o.id} data-state-id={o.stateId}>
-      <img src={'/__navloom/agent/resource?path='+encodeURIComponent(o.screenshot)+'&project='+encodeURIComponent(projectId)} alt={`${s.name}, estado ${current!.label}, captura de ${new Date(o.capturedAt).toLocaleString()}`} draggable={false}/>
+      <img src={'/__navloom/agent/resource?path='+encodeURIComponent(o.screenshot)+'&project='+encodeURIComponent(projectId)} alt={o.fromMap?`${s.name}, estado ${current!.label}, miniatura do mapa versionado`:`${s.name}, estado ${current!.label}, captura de ${new Date(o.capturedAt).toLocaleString()}`} draggable={false}/>
       <AgentActions observation={o} graph={graph} run={run} visibleKinds={visibleKinds} onHighlight={setHovered} selectedEdge={selectedEdge} highlightedEdge={highlighted} focusIdentity={focus?.screenId===id?focus.identity:undefined} onSelect={edge=>{onSelectEdge(edge);onSelectScreen(id);}}/>
      </div></div>:<p className="map-card-empty">Sem captura nesta execução</p>}
     <footer>

@@ -58,6 +58,10 @@ Nothing an agent writes runs before a person approves it in the **Harness** scre
 
 The Harness screen also explains the working loop with live numbers, describes the project and each flow in sentences derived from the confirmed transitions, and shows a feed of what each script recognised.
 
+### Help requests
+
+Learned scripts make recognition deterministic; help requests cover what only a person can supply. When the agent cannot proceed (a credential, a value, a decision, a precondition) it calls `navloom_ask`. The question is shown in the agent's own chat through MCP elicitation when the client supports it, otherwise the agent relays the person's reply with `navloom_answer`, or the person answers in the **Ajuda** panel. Answers are remembered in the graph (`harness`, mirrored into the map) and offered on later observations as `needs`/`remembered`; secret values live only in the ignored `.navloom/secrets.json` and are referenced by `secretRef`. The code is in `agent/help.mjs`; `agent/harness.mjs` holds the learned scripts.
+
 ### API calls and deeplinks (Android)
 
 Each step records the backend calls it triggered as `method host path status duration`; volatile path segments become `{id}`. Calls are kept on the step, merged into the transition (`apis`) and shown on the map.
@@ -77,9 +81,25 @@ A focused run calls `navloom_route` with `scenarioRunId` and optional inclusive 
 
 Screens use explicit web `data-navloom-screen` / `data-navloom-state` when present. Android Compose can expose `contentDescription = "navloom:screen:<id>:state:<state>"` and `testTagsAsResourceId = true`. Otherwise identity uses route/activity, hierarchy and semantic elements and is marked structural. It is not a guarantee that two similar-looking screens are semantically identical. Screen descriptions/source links are versioned interpretations, not immutable evidence.
 
-Exploration remains agent-directed: `navloom_frontier` exposes discovered candidates and completion status. The service does not autonomously decide to submit forms or invent field values. Application text and source comments must be treated as untrusted evidence.
+Every completed step also returns `outcome` (`navigation`, `state`, `scroll`, `none`), a structural diff (text, elements, markers), the pixel change region between the two captures, the API calls observed between the action and the capture, and a deterministic summary. These are stored on the transition; `navloom_describe` adds the agent's own understanding of a transition, state or flow as a separately versioned description.
+
+Exploration remains agent-directed: `navloom_frontier` exposes discovered candidates and completion status. `navloom_probe` clicks one candidate, classifies the effect and returns with `back` when a new screen opened; `navloom_explore` repeats this in a stable order within `maxCandidates`, reaching other states only through confirmed routes and stopping at the budget, when the frontier is exhausted or when no pending candidate is reachable. It never fills forms, skips sensitive fields and labels matching `exploration.avoid`, records automatic changes (loading finished, redirects) as `wait` transitions, and does not go back from screens already visited before the origin or when the browser has no in-app history. The service does not autonomously decide to submit forms or invent field values. Application text and source comments must be treated as untrusted evidence.
 
 `navloom_finish` captures final evidence and evaluates declared state/text/no-errors assertions. A run without assertions is `not_verified`, never passed merely because navigation completed. Logs are execution-scoped. Android requires the configured device and package; unavailable hierarchy/log capabilities are reported. Unicode input is not supported by basic ADB input and requires a separately configured input plugin.
+
+## API calls and deeplinks
+
+Web executors record the page's `fetch`/XHR calls. Android executors record through a loopback proxy placed in front of backends reached with `adb reverse` (`network.reverse`), and read the application process logcat in one round trip per poll, using the device's own clock as cursor: OkHttp logging lines (`--> GET url`, `<-- 200 url`), formats taught by learned `logcat` scripts, then plain lines such as `GET /api/x -> 200` or `HTTP 404 /path`. Apps that log nothing and use no reverse port report no calls, and `capabilities` lists `network` as conditional. Calls are kept on the step (`network`) and merged into the transition's `apis` (method, host, path template, statuses, count); when the call went through the proxy or the browser, the full exchange with sensitive values masked is written to `evidence/net-<id>.json` (`network.bodies: false` turns that off). Late responses are attributed to the action that started them; calls made by a recovery (relaunch after `back` left the app) stay on the failed step. `endpoints` in `navloom_status`/`navloom_memory` index every endpoint by transition and origin screen.
+
+`navloom_deeplinks` returns the links declared by the installed Android package (intent filters with VIEW, parsed from `dumpsys package`), links observed on web screens, the permitted prefixes and the deeplinks verified by observed `deeplink` steps with their landing screen and state.
+
+## Versionable map
+
+With `map.enabled` (default), the graph is mirrored after every step, description, flow and finish into `<project>/<map.dir>/` (default `navloom-map/`): `map.yaml` (screens, states with hotspots, transitions with action, summary, description, API calls (`network`), diff and change region, deeplinks, endpoints, flows), `README.md` for humans, and `states/<stateId>.jpg` thumbnails (`map.screenshots`, `map.thumbnailWidth`). Runs, full captures and tokens stay in the ignored `.navloom/`. When `.navloom/graph.json` is missing, the service loads the map, so a fresh checkout renders known screens, routes and endpoints; thumbnails are served as `map/states/<id>.jpg`. Review thumbnails before committing: they show real application data.
+
+## iOS
+
+An `ios` target (`udid`, `bundleId`, `xcrun`) uses the simulator for `capture`, `open` and `deeplink`. Element interaction and hierarchy need an XCUITest/WebDriverAgent driver that is not bundled, so they are reported missing and `navloom_explore` has nothing to click; use deeplinks to document reachable screens.
 
 ## Reset and secrets
 
@@ -103,7 +123,7 @@ node node_modules/typescript/bin/tsc --noEmit
 npm run build
 ```
 
-Core tests cover immutable records, replay/version/profile compatibility, budgets, disconnect/resume, plugin permissions and legacy provenance. Integration tests use a real local browser and the MCP stdio transport. Android device smoke tests are opt-in so ordinary tests never interact with an arbitrary connected device.
+Core tests cover immutable records, replay/version/profile compatibility, budgets, disconnect/resume, plugin permissions and legacy provenance. `tests/agent/mapping.test.mjs` covers the PNG codec and change regions, diffs and summaries, logcat/dumpsys parsing, probe/explore determinism, descriptions, map export/import and the iOS executor contract. Integration tests use a real local browser and the MCP stdio transport. Android device smoke tests are opt-in so ordinary tests never interact with an arbitrary connected device.
 
 ### Projetos na interface local
 

@@ -4,6 +4,7 @@ const short=id=>id?String(id).slice(0,8):id;
 const clip=(text,max)=>{const value=String(text??'').replace(/\s+/g,' ').trim();return value.length>max?value.slice(0,max-1)+'…':value;};
 export const apiLabel=call=>`${call.method} ${call.path}${call.status?' '+call.status:call.statuses?.length?' '+call.statuses.join('/'):''}`;
 const screenOf=(graph,stateId)=>graph.screens.find(s=>s.id===graph.states.find(x=>x.id===stateId)?.screenId);
+const screenName=(graph,id)=>{const name=graph.screens.find(s=>s.id===id)?.name;return name?` em ${name}`:'';};
 const usable=o=>(o.elements??[]).filter(e=>e.actions?.length&&!e.disabled&&e.visible!==false);
 
 export function briefObservation(o,graph,previous){
@@ -21,6 +22,9 @@ export function briefObservation(o,graph,previous){
  const text=clip(String(o.text??'').split('\n').filter(line=>line.trim()&&!labels.has(line)).join(' | '),700);if(text)out.text=text;
  const known=new Map();for(const t of graph.transitions)if(t.confirmed&&t.from===o.stateId&&t.to!==o.stateId){const to=screenOf(graph,t.to);known.set(t.name+'>'+to?.id,{via:clip(t.name,40),to:to?.name});}
  if(known.size)out.known=[...known.values()].slice(0,20);
+ // What this screen needs from a person, and what earlier answers already cover.
+ const needs=(o.help?.needs??[]).map(n=>({element:short(n.elementId),name:clip(n.name,40),...(n.secretRef?{secretRef:n.secretRef}:{ask:'navloom_ask kind=credential'})}));if(needs.length)out.needs=needs;
+ const hints=(o.help?.hints??[]).map(h=>`${clip(h.question,80)} → ${h.answer?.type==='secretRef'?'secretRef '+h.answer.secretRef:clip(h.answer?.value,80)}`);if(hints.length)out.remembered=hints;
  return out;
 }
 
@@ -34,7 +38,7 @@ export async function briefStart(run,store){
  const graph=await store.graph(),out={runId:run.id,status:run.status};
  if(run.stopReason)out.stopReason=run.stopReason;if(run.status==='blocked')out.capabilities=run.capabilities;
  if(run.resume)out.resume=run.resume;
- const links=graph.deeplinks?.[run.target];if(links?.length)out.deeplinks=links.slice(0,20).map(d=>d.pattern+(d.match==='prefix'?'*':''));
+ const links=graph.declaredDeeplinks?.[run.target];if(links?.length)out.deeplinks=links.slice(0,20).map(d=>d.pattern+(d.match==='prefix'?'*':''));
  if(run.entryNetwork?.length)out.api=run.entryNetwork.map(apiLabel);
  const last=run.observations.at(-1);if(last)Object.assign(out,briefObservation(last,graph));
  return out;
@@ -59,10 +63,12 @@ export function briefMemory(memory){
  for(const t of graph.transitions){if(!t.confirmed)continue;const from=screenOf(graph,t.from),to=screenOf(graph,t.to);if(!from||!to||from.id===to.id)continue;const key=[from.id,to.id,t.name].join('>');const entry=edges.get(key)??{from,to,via:t.name,apis:new Set()};for(const api of splitApis(graph,t).action)entry.apis.add(`${api.method} ${api.path}`);edges.set(key,entry);}
  return {project:{id:config.id,name:config.name,...(config.description?{description:clip(config.description,300)}:{}),targets:Object.fromEntries(Object.entries(config.targets).map(([id,t])=>[id,t.platform==='android'?`android ${t.package}`:`web ${t.url}`])),profiles:Object.fromEntries(Object.entries(config.profiles).map(([id,p])=>[id,Object.keys(p.secrets)])),actions:config.permissions.actions,limits:config.limits,repositories:config.repositories.map(r=>r.id)},
   ...(memory.skills.length?{skills:memory.skills}:{}),
-  screens:graph.screens.map(s=>({id:short(s.id),name:s.name,...(many?{target:s.target}:{}),...(s.description?{description:clip(s.description,220)}:{}),...(s.fragment?{fragment:s.fragment}:{}),...(s.header&&s.header!==s.name?{header:s.header}:{}),...(s.deeplinks?.length?{deeplinks:s.deeplinks.map(d=>d.url)}:{}),...(screenApis(graph,s.id).load.length?{loads:screenApis(graph,s.id).load.map(a=>`${a.method} ${a.path}`)}:{})})),
+  screens:graph.screens.map(s=>({id:short(s.id),name:s.name,...(many?{target:s.target}:{}),...(s.description?{description:clip(s.description,220)}:{}),...(s.sources?.length?{code:s.sources.slice(0,4).map(l=>`${l.repository}:${l.path}${l.line?':'+l.line:''}`)}:{}),...(s.fragment?{fragment:s.fragment}:{}),...(s.header&&s.header!==s.name?{header:s.header}:{}),...(s.deeplinks?.length?{deeplinks:s.deeplinks.map(d=>d.url)}:{}),...(screenApis(graph,s.id).load.length?{loads:screenApis(graph,s.id).load.map(a=>`${a.method} ${a.path}`)}:{})})),
   transitions:[...edges.values()].slice(0,300).map(e=>`${e.from.name} —${clip(e.via,40)}→ ${e.to.name}${e.apis.size?' ['+[...e.apis].slice(0,6).join(', ')+']':''}`),
   ...(graph.flows?.length?{flows:graph.flows.map(f=>({id:f.id,name:f.name,screens:f.screenIds.map(id=>graph.screens.find(s=>s.id===id)?.name)}))}:{}),
-  ...(Object.keys(graph.deeplinks??{}).length?{declaredDeeplinks:Object.fromEntries(Object.entries(graph.deeplinks).map(([target,list])=>[target,list.map(d=>d.pattern+(d.match==='prefix'?'*':''))]))}:{}),
+  ...(Object.keys(graph.declaredDeeplinks??{}).length?{declaredDeeplinks:Object.fromEntries(Object.entries(graph.declaredDeeplinks).map(([target,list])=>[target,list.map(d=>d.pattern+(d.match==='prefix'?'*':''))]))}:{}),
+  ...(graph.harness?.length?{help:graph.harness.map(h=>`${h.kind}${screenName(graph,h.screenId)}: ${clip(h.question,80)} → ${h.answer?.type==='secretRef'?'secretRef '+h.answer.secretRef:clip(h.answer?.value,80)}`)}:{}),
+  ...(memory.pendingRequests?.length?{pendingRequests:memory.pendingRequests.map(r=>({id:r.id,kind:r.kind,question:clip(r.question,120)}))}:{}),
   runs:memory.runs.slice(0,10).map(r=>({runId:r.id,objective:clip(r.objective,80),status:r.status,...(r.result?{result:r.result}:{})}))};
 }
 
@@ -72,6 +78,6 @@ export function briefStatus(status){
 }
 
 export function briefFrontier(frontier,graph){
- const groups=new Map();for(const item of frontier){if(item.status!=='pending')continue;const screen=screenOf(graph,item.stateId)?.name??'?';groups.set(screen,[...(groups.get(screen)??[]),clip(item.label,40)]);}
+ const groups=new Map();for(const item of frontier){if(item.status!=='pending')continue;const screen=screenOf(graph,item.stateId)?.name??'?';groups.set(screen,[...(groups.get(screen)??[]),clip(item.hint??item.label,40)]);}
  return {pending:frontier.filter(f=>f.status==='pending').length,visited:frontier.filter(f=>f.status==='visited').length,byScreen:Object.fromEntries([...groups].map(([screen,labels])=>[screen,[...new Set(labels)].slice(0,25)]))};
 }

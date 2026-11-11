@@ -38,5 +38,12 @@ permissions:
   deeplinkPrefixes: [http://127.0.0.1:4790/, 'navloomlab://app/']
   pluginCapabilities: [read_graph, deeplink]
   pluginImages: [node:22-alpine]
+map:
+  enabled: true
+  dir: navloom-map
+  screenshots: true
+  thumbnailWidth: 480
+exploration:
+  avoid: [logout, sair, 'log out', 'sign out', delete, excluir, remover, apagar, 'cancelar conta', 'encerrar conta']
 skills: [.navloom/skills/explore.md]
 plugins: [.navloom/plugins/deeplinks/plugin.yaml]

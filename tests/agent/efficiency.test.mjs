@@ -24,7 +24,7 @@ async function setup(t){const root=await mkdtemp(join(tmpdir(),'navloom-eff-'));
 test('steps record API calls without secrets and agents receive a compact result',async t=>{const r=await setup(t);const run=await r.start({target:'web',mode:'exploratory',objective:'Buy'});
  const result=await r.step(run.id,{type:'click',elementId:'01234567'});assert.equal(result.status,'completed');
  assert.deepEqual(result.step.network.map(c=>[c.method,c.host,c.path,c.status]),[['POST','api.test','/api/orders/{id}',201]]);
- const graph=await r.store.graph();assert.deepEqual(graph.transitions[0].apis,[{method:'POST',host:'api.test',path:'/api/orders/{id}',statuses:[201]}]);
+ const graph=await r.store.graph();assert.deepEqual(graph.transitions[0].apis,[{method:'POST',host:'api.test',path:'/api/orders/{id}',statuses:[201],count:1}]);
  const brief=await briefStep(result,r.store),full=JSON.stringify(result),small=JSON.stringify(brief);
  assert.deepEqual(brief.api,['POST /api/orders/{id} 201']);assert.equal(brief.changed,'screen');assert.equal(brief.elements[0].id,'01234567');assert.ok(!small.includes('hierarchy/'));assert.ok(small.length<full.length/2,`${small.length} vs ${full.length}`);
  // The raw hierarchy stays in the evidence file only.
@@ -32,13 +32,13 @@ test('steps record API calls without secrets and agents receive a compact result
  await r.finish(run.id);});
 
 test('goto reaches a known screen in one call and declared deeplinks are permitted',async t=>{const r=await setup(t);const first=await r.start({target:'web',mode:'exploratory',objective:'Learn'});
- assert.equal((await r.store.graph()).deeplinks.web[0].pattern,'shop://app');
+ assert.equal((await r.store.graph()).declaredDeeplinks.web[0].pattern,'shop://app');
  await r.step(first.id,{type:'click',elementId:'0123456789abcdef'});await r.step(first.id,{type:'click',elementId:'0123456789abcdef'});
  await assert.rejects(r.step(first.id,{type:'deeplink',url:'other://app/cart'}),/not permitted/);
  const linked=await r.step(first.id,{type:'deeplink',url:'shop://app/cart'});assert.equal(linked.status,'completed');
  assert.equal((await r.store.graph()).screens.find(s=>s.name==='Cart').deeplinks[0].url,'shop://app/cart');
  await r.organize({screens:[{id:'Receipt',name:'Comprovante',description:'Confirma a compra.'}],flows:[{id:'buy',name:'Compra',screenIds:['Home','Cart','Comprovante'],runIds:[first.id]}]});await r.finish(first.id);
- const memory=briefMemory(await r.memory());assert.ok(memory.transitions.some(line=>line.includes('Home —Next→ Cart [POST /api/orders/{id}]')),memory.transitions.join('\n'));assert.deepEqual(memory.flows[0].screens,['Home','Cart','Comprovante']);assert.ok(JSON.stringify(memory).length<2500);
+ const memory=briefMemory(await r.memory({detail:'full'}));assert.ok(memory.transitions.some(line=>line.includes('Home —Next→ Cart [POST /api/orders/{id}]')),memory.transitions.join('\n'));assert.deepEqual(memory.flows[0].screens,['Home','Cart','Comprovante']);assert.ok(JSON.stringify(memory).length<2500);
  const second=await r.start({target:'web',mode:'focused',objective:'Again'});assert.ok((await briefStart(second,r.store)).deeplinks.includes('shop://app*'));
  const moved=await r.goto({runId:second.id,screen:'Comprovante'});assert.equal(moved.status,'arrived');assert.equal(moved.steps,2);assert.equal(moved.observation.screenKey,'receipt');
  const done=await r.finish(second.id);assert.equal(done.metrics.agentCalls,0);assert.equal(done.metrics.replayedSteps,2);assert.equal((await r.goto({runId:(await r.start({target:'web',mode:'focused',objective:'Here'})).id,screen:'Home'})).status,'already_there');await r.close();});
@@ -61,7 +61,7 @@ test('network helpers: path templates, late results, OkHttp logs and the adb-rev
  const log=new CallLog(),slow=log.begin({method:'GET',url:'https://h.test/slow'});let drained=log.drain();assert.equal(drained.calls[0].status,null);log.end(slow,200);drained=log.drain();assert.equal(drained.calls.length,0);assert.equal(drained.late[0].status,200);
  const both=new CallLog();both.end(both.begin({method:'POST',host:'127.0.0.1:4791',path:'/api/login',source:'proxy'}),401);both.complete({url:'/api/login',status:401,source:'logcat'});assert.equal(both.drain().calls.length,1,'proxy and log line describe one call');
  assert.deepEqual(parseHttpLog('D OkHttp: --> POST https://h.test/api/login'),{phase:'request',method:'POST',url:'https://h.test/api/login'});assert.equal(parseHttpLog('D OkHttp: <-- 401 Unauthorized https://h.test/api/login (35ms, 12-byte body)').status,401);assert.equal(parseHttpLog('I App: hello'),null);
- assert.deepEqual(mergeApis([{method:'GET',host:'h',path:'/a',statuses:[200]}],[{method:'GET',host:'h',path:'/a',status:500},{method:'GET',host:'h',path:'/b',status:null}]),[{method:'GET',host:'h',path:'/a',statuses:[200,500]},{method:'GET',host:'h',path:'/b',statuses:[]}]);
+ assert.deepEqual(mergeApis([{method:'GET',host:'h',path:'/a',statuses:[200]}],[{method:'GET',host:'h',path:'/a',status:500},{method:'GET',host:'h',path:'/b',status:null}]),[{method:'GET',host:'h',path:'/a',statuses:[200,500],count:1},{method:'GET',host:'h',path:'/b',statuses:[],count:1}]);
  const backend=createServer((req,res)=>{res.statusCode=req.url==='/api/missing'?404:200;res.end('{"ok":true}');});await new Promise(r=>backend.listen(0,'127.0.0.1',r));const proxied=new CallLog(),proxy=await recordingProxy(`http://127.0.0.1:${backend.address().port}`,proxied);t.after(async()=>{await proxy.close();backend.close();});
  assert.equal(await (await fetch(`http://127.0.0.1:${proxy.port}/api/home?session=abc`)).text(),'{"ok":true}');assert.equal((await fetch(`http://127.0.0.1:${proxy.port}/api/missing`)).status,404);
  assert.deepEqual(proxied.drain().calls.map(c=>`${c.method} ${c.path} ${c.status}`),['GET /api/home 200','GET /api/missing 404']);
@@ -90,7 +90,7 @@ test('harness: learned scripts stay inert until approved, then recognise request
  const proposed=await h.propose(logcat,'agent');assert.equal(proposed.status,'proposed');assert.equal(h.apply('logcat',{line:'E/NavloomLab( 1): HTTP 500 /api/cart'}),null,'unapproved code never runs');
  assert.equal((await h.review('lab-http','approve')).status,'active');assert.deepEqual(h.apply('logcat',{line:'E/NavloomLab( 1): HTTP 500 /api/cart'}).value,{url:'/api/cart',status:500});
  // The Android executor feeds unrecognised log lines to the learned script.
- const android=new AndroidExecutor({adb:'adb',serial:'emulator-5554',package:'dev.test.app'},{runCommand:async(file,args)=>args.includes('pidof')?'42':args.includes('logcat')?'1700000001.500  42  42 E NavloomLab: HTTP 503 /api/products\n1700000001.600  42  42 I Other: noise':''});android.harness=h;android.logSince='1700000000.000';
+ const android=new AndroidExecutor({adb:'adb',serial:'emulator-5554',package:'dev.test.app'},{runCommand:async(file,args)=>args.some(a=>a.includes('logcat'))?'1700000001.500  42  42 E NavloomLab: HTTP 503 /api/products\n1700000001.600  42  42 I Other: noise':''});android.harness=h;android.networkCursor=1700000000;
  assert.deepEqual((await android.network()).calls.map(c=>`${c.path} ${c.status}`),['/api/products 503']);
  // A wrong sample keeps a script off; hostile-looking code cannot reach the host through the context.
  await h.propose({...logcat,id:'bad',samples:[{input:{line:'x'},expect:{url:'/never'}}]},'agent');assert.equal((await h.review('bad','approve')).status,'failed');
@@ -101,7 +101,7 @@ test('harness: learned scripts stay inert until approved, then recognise request
  await h.propose({id:'orders',kind:'path',name:'Pedidos',code:'function run(i){return i.path.startsWith("/api/orders/")?"/api/orders/{order}":null;}',samples:[{input:{path:'/api/orders/{id}'},expect:'/api/orders/{order}'}]},'agent');await h.review('orders','approve');
  const run=await r.start({target:'web',mode:'exploratory',objective:'Identity'});const first=run.observations[0];assert.equal(first.screenKey,'home');assert.equal(first.identifiedBy,'home-screen');assert.equal((await r.store.graph()).screens[0].name,'Início');
  const step=await r.step(run.id,{type:'click',elementId:'0123456789abcdef'});assert.equal(step.status,'completed','a changing greeting no longer looks like a different screen');assert.equal(step.observation.screenId,first.screenId);assert.equal(step.step.network[0].path,'/api/orders/{order}');
- const status=await r.status();assert.ok(status.harness.activity.some(a=>a.event==='match'&&a.scriptId==='home-screen'));assert.ok(status.harness.scripts.find(s=>s.id==='orders').stats.matches>=1);
+ const status=await r.status({detail:'full'});assert.ok(status.harness.activity.some(a=>a.event==='match'&&a.scriptId==='home-screen'));assert.ok(status.harness.scripts.find(s=>s.id==='orders').stats.matches>=1);
  // Persisted in the project and reloaded.
  await r.finish(run.id);const again=await new Harness(r.store).load();assert.equal(again.list().find(s=>s.id==='lab-http').status,'active');assert.match(await readFile(join(root,'.navloom/harness/lab-http.js'),'utf8'),/function run/);
 });
