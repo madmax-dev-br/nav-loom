@@ -110,7 +110,7 @@ Sequência mínima de uma sessão:
 1. `navloom_memory`: o que já se sabe (telas, estados, transições, endpoints, deeplinks, harness, execuções anteriores). Não reexplore o que já está mapeado.
 2. `navloom_capabilities` com o alvo: confirma dispositivo, app instalado, hierarquia e rede.
 3. `navloom_start` com `target`, `mode` (`exploratory` ou `focused`), `objective` e `assertions` opcionais. Abre o app e captura a entrada.
-4. Loop de exploração (seção 5). Para chegar a uma tela já conhecida use `navloom_goto` (uma chamada) em vez de repetir passos.
+4. Loop de exploração (seção 5). Para chegar a uma tela já conhecida use `navloom_goto` (uma chamada, mesmo sem missão aberta) em vez de repetir passos.
 5. `navloom_organize` uma vez: nomeia e descreve as telas e agrupa os fluxos (telas na ordem da primeira visita). `navloom_describe` por transição/estado, em linguagem de negócio.
 6. `navloom_finish`: avalia asserções, coleta diagnóstico e cobertura. Sem asserções o resultado é `not_verified`, nunca "passou".
 
@@ -123,7 +123,7 @@ Cada passo (`navloom_step`, `navloom_goto`, `navloom_replay`) já devolve a tela
 - `navloom_step` executa uma ação explícita: `click`, `fill` (com `value` ou `secretRef`), `scroll`, `back`, `wait`, `deeplink`, `open`. Sempre use o `elementId` da observação atual; se a tela mudou, observe de novo. Coordenadas (`point`) só como último recurso, com o `observationId` atual.
 - Formulários: preencha com `fill`, submeta com `click`, e descreva o que aconteceu. Nunca invente valores de negócio (CPF, cartão, chaves); peça (seção 6).
 - `navloom_frontier` mostra o que ainda não foi visitado. Frontier vazia significa cobertura dos candidatos descobertos, não do app inteiro.
-- `navloom_goto` leva a uma tela conhecida (nome ou id) em uma chamada: planeja sobre transições confirmadas e deeplinks verificados, reexecuta localmente e devolve só a chegada. É navegação; não prova um fluxo de negócio.
+- `navloom_goto {screen}` leva a uma tela conhecida (nome ou id) sem raciocínio seu: o Navloom segue o grafo de decisão aprendido (observa, consulta a próxima ação, age), refaz o que foi digitado em formulários, sai de desvios com voltar/reinício e usa deeplinks verificados como atalho. Não precisa de missão aberta: sem `runId` ele usa a ativa ou abre uma e devolve o `runId` (encerre com `navloom_finish`). Se voltar `stuck`, continue da tela devolvida com `navloom_step`; esses passos entram no grafo e o próximo `goto` vai mais longe sozinho. `plan: true` só lista as decisões. É navegação; não prova um fluxo de negócio.
 - Rotas: `navloom_route` planeja um caminho confirmado até um estado; `navloom_replay` o executa e para na primeira divergência. Para repetir um cenário exato use `scenarioRunId` com `startStep`/`endStep`.
 - Android: `back` numa tela raiz fecha o app; o Navloom relança e reporta falha recuperável, a missão continua. Entrada de texto por ADB só aceita ASCII.
 

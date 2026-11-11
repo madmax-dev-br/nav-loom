@@ -4,6 +4,7 @@ import {resolve,join} from 'node:path';
 import {Store,uid,now,hash,safePath} from './store.mjs';
 import {actionSchema,missionSchema} from './schema.mjs';
 import {recordObservation,confirmTransition,planRoute,compareRuns,identity,resolveScreen,placeScroll} from './graph.mjs';
+import {decisionGraph,describeDecisions} from './navigate.mjs';
 import {observationDiff,imageDiff,classifyOutcome,summarizeTransition} from './diff.mjs';
 import {mergeApis,endpointIndex,normalizeCall,normalizePath} from './network.mjs';
 import {exportMap,importMap} from './map.mjs';
@@ -182,18 +183,70 @@ export class Runtime{
  async route(input){const run=await this.store.run(input.runId),graph=await this.store.graph();if(input.scenarioRunId){const scenario=await this.store.run(input.scenarioRunId),steps=scenario.steps.slice(input.startStep??0,input.endStep===undefined?undefined:input.endStep+1);if(!steps.length||steps.some(s=>s.status!=='completed'||!s.transitionId))return {found:false,steps:[],reason:'Scenario segment contains incomplete or unconfirmed steps'};const edges=steps.map(s=>graph.transitions.find(e=>e.id===s.transitionId));if(edges.some(e=>!e||e.target!==run.target||e.profile!==run.profile||hash(e.preconditions)!==hash(run.preconditions)||e.version?.fingerprint!==run.version?.fingerprint))return {found:false,steps:[],reason:'Scenario platform, profile, preconditions or version is incompatible'};if(edges[0].from!==(input.from??run.observations.at(-1)?.stateId))return {found:false,steps:[],reason:'Prepare the scenario entry before replaying the test segment',requiredEntry:edges[0].from};for(let i=1;i<edges.length;i++)if(edges[i-1].to!==edges[i].from)return {found:false,steps:[],reason:'Scenario contains a context gap; reconstruct that section explicitly'};return {found:true,steps:edges.map(e=>e.id),cost:edges.length,scenarioRunId:scenario.id,scope:'exact_scenario_segment'};}if(!input.to)throw Error('Provide a destination or a recorded scenario');return planRoute(graph,{...input,from:input.from??run.observations.at(-1)?.stateId,target:run.target,profile:run.profile,preconditions:run.preconditions,version:run.version});}
  /** `strict:false` (or `soft`) keeps the mission running when the application lands elsewhere: the divergence is recorded as new evidence. */
  async replay(id,transitionIds,{purpose='test',strict=true,soft=!strict,anyVersion=false}={}){if(!transitionIds.length||transitionIds.length>100)throw Error('Choose 1–100 transitions');const results=[];for(const [index,edgeId] of transitionIds.entries()){const run=await this.live(id),graph=await this.store.graph(),edge=graph.transitions.find(e=>e.id===edgeId);if(!edge?.confirmed||edge.target!==run.target||edge.profile!==run.profile||hash(edge.preconditions)!==hash(run.preconditions))throw Error('Incompatible transition');if(!anyVersion&&edge.version?.fingerprint!==run.version.fingerprint)throw Error('Version changed: explicitly re-explore this section');const observation=run.observations.at(-1),shortcut=edge.action.type==='deeplink'&&purpose==='preparation';if(observation.stateId!==edge.from&&!shortcut)return {status:'recovery_required',reason:'Unexpected source state',at:edgeId,results};const action={...edge.action,observationId:observation.id};const elementIdentity=action.elementIdentity;delete action.elementIdentity;if(elementIdentity){const element=observation.elements.find(e=>e.identity===elementIdentity);if(!element)return {status:'recovery_required',reason:'Locator missing',at:edgeId,results};action.elementId=element.id;}if(action.type==='deeplink'&&purpose!=='preparation')throw Error('Deeplink shortcuts are only permitted during preparation');const result=await this.step(id,action,{replay:true,verify:index===0,expectedState:edge.to,soft});results.push(result);if(result.status!=='completed')return {status:soft&&result.status==='diverged'?'diverged':'recovery_required',reason:result.reason??(result.status==='diverged'?'The application reached a different state than the recorded one':undefined),at:edgeId,results};}return {status:'completed',results};}
- /** Reach a known screen in one call: plan over confirmed transitions (and verified deeplinks), replay locally, report only the arrival. */
- async goto({runId,screen,state}){if(!screen&&!state)throw Error('Provide a screen or a state');const run=await this.live(runId),graph=await this.store.graph(),config=await this.store.config(),current=run.observations.at(-1);let goals;
- if(state){const matches=graph.states.filter(s=>s.id===state||(state.length>=6&&s.id.startsWith(state)));if(matches.length!==1)throw Error('Unknown or ambiguous state');goals=new Set([matches[0].id]);}else{const wanted=resolveScreen(graph,screen,run.target);goals=new Set(graph.states.filter(s=>s.screenId===wanted.id).map(s=>s.id));}
- if(goals.has(current.stateId))return {status:'already_there',steps:0,observation:current};
- const plan=planRoute(graph,{from:current.stateId,to:goals,target:run.target,profile:run.profile,preconditions:run.preconditions,version:run.version,allowUnverifiedVersion:true,allowDeeplinks:config.permissions.actions.includes('deeplink')});
- if(!plan.found)return {status:'no_route',steps:0,reason:'No known route from the current state. Navigate step by step; the path is remembered for next time.',observation:current};
- // Loading states settle through recorded waits; follow them so the agent lands on the usable state.
- const steps=[...plan.steps];let at=plan.to;for(let i=0;i<3;i++){const settle=graph.transitions.find(e=>e.from===at&&e.confirmed&&e.action.type==='wait'&&e.to!==at&&goals.has(e.to)&&e.target===run.target&&e.profile===run.profile);if(!settle)break;steps.push(settle.id);at=settle.to;}
- let result=await this.replay(runId,steps,{purpose:'preparation',soft:true,anyVersion:true}),taken=result.results.length;
- // A deeplink may need a session or other context it cannot create. Fall back to the recorded taps from wherever it landed.
- if(result.status==='diverged'&&steps.some(id=>graph.transitions.find(e=>e.id===id)?.action.type==='deeplink')){const here=(await this.store.run(runId)).observations.at(-1),fresh=await this.store.graph();if(goals.has(here.stateId))return {status:'arrived',steps:taken,observation:here};const retry=planRoute(fresh,{from:here.stateId,to:goals,target:run.target,profile:run.profile,preconditions:run.preconditions,version:run.version,allowUnverifiedVersion:true});if(retry.found){result=await this.replay(runId,retry.steps,{purpose:'preparation',soft:true,anyVersion:true});taken+=result.results.length;}}
- const after=await this.store.run(runId);return {status:result.status==='completed'?'arrived':result.status,steps:taken,reason:result.reason,runStatus:after.status,observation:after.observations.at(-1)};}
+ /** Take one transition of the decision graph from wherever the mission is now. */
+ async follow(id,edge,options={}){const run=await this.store.run(id),observation=run.observations.at(-1),action={...edge.action,observationId:observation.id},wanted=action.elementIdentity;delete action.elementIdentity;
+  if(wanted){const element=observation.elements.find(e=>e.identity===wanted);if(!element)throw Error('Locator missing');action.elementId=element.id;}
+  return this.step(id,action,{replay:true,soft:true,...options});}
+ /** What was typed during the visit to the screen that ended with this action, when it was recorded: the form's fields, in order, last value of each. */
+ async fillsBefore(graph,edge){for(const proof of (edge.evidence??[]).filter(e=>!e.diverged).reverse().slice(0,3)){const run=await this.store.run(proof.runId).catch(()=>null),index=run?.steps.findIndex(s=>s.id===proof.stepId)??-1;if(index<0)continue;
+   const screenOf=new Map(run.observations.map(o=>[o.id,o.screenId])),screen=screenOf.get(run.steps[index].before),fills=new Map();
+   for(let i=index-1;i>=0;i--){const step=run.steps[i],made=graph.transitions.find(t=>t.id===step.transitionId);if(screenOf.get(step.before)!==screen||screenOf.get(step.after)!==screen)break;if(step.action.type==='fill'&&step.status==='completed'&&made?.action.elementIdentity&&!fills.has(made.action.elementIdentity))fills.set(made.action.elementIdentity,made);}
+   return [...fills.values()].reverse();}return [];}
+ /** Back at the entry screen, keeping the mission. */
+ async restart(run){if(this.executor.restart)await this.executor.restart();else{const config=await this.store.config();await this.executor.close().catch(()=>{});this.executor=this.factory(config.targets[run.target]);await this.executor.start();}
+  // A cold start takes a moment to draw: wait until there is something on screen, so a blank frame is never taken for the entry screen.
+  for(let i=0;i<12;i++){const seen=await this.look().catch(()=>null);if(seen?.elements?.length)break;await new Promise(r=>setTimeout(r,600));}
+  const entry=await this.captureRun(run),graph=await this.store.graph();graph.entries??={};if(graph.entries[run.target]!==entry.stateId){graph.entries[run.target]=entry.stateId;await this.store.saveGraph(graph);}return entry;}
+ /**
+  * Reach a known screen without reasoning. The decision graph of the destination says, for every state seen so far, which
+  * action comes next; this loop observes, looks the action up and acts until it arrives. Because it decides again after
+  * every step, it works from wherever the app is: a state whose content changed, a detour, a deeplink that needed a session.
+  * Unknown ground is left with back, then one restart. It starts its own mission when none is active, and what happened
+  * is kept per screen so a person can see how dependable each direct route is.
+  */
+ async goto({runId,target,profile='default',screen,state,plan:dry=false},owner='interface'){if(!screen&&!state)throw Error('Provide a screen or a state');
+  const config=await this.store.config();let graph=await this.store.graph(),run=runId?await this.live(runId):this.active?await this.live(this.active):null,goals,wanted;
+  if(state){const matches=graph.states.filter(s=>s.id===state||(state.length>=6&&s.id.startsWith(state)));if(matches.length!==1)throw Error('Unknown or ambiguous state');goals=new Set([matches[0].id]);wanted=graph.screens.find(s=>s.id===matches[0].screenId);}
+  else{wanted=resolveScreen(graph,screen,run?.target??target);goals=new Set(graph.states.filter(s=>s.screenId===wanted.id).map(s=>s.id));}
+  const scope=run??{target:target??wanted.target,profile,preconditions:{},version:null};
+  let ownMission=false;const build=(known,avoid)=>decisionGraph(known,{entries:[known.entries?.[scope.target],ownMission?null:run?.observations[0]?.stateId].filter(Boolean),goals,target:scope.target,profile:scope.profile,preconditions:scope.preconditions,version:scope.version,allowDeeplinks:config.permissions.actions.includes('deeplink'),avoid});
+  if(dry)return {status:'planned',screen:wanted.name,...describeDecisions(graph,build(graph,new Set())),learned:graph.routes?.[wanted.id]??null};
+  let started=false;if(!run){run=await this.start({target:scope.target,profile,mode:'focused',objective:`Ir para ${wanted.name}`},owner);if(run.status!=='running')return {status:'blocked',steps:0,reason:run.stopReason,runId:run.id};started=true;ownMission=true;
+   // Launching may only bring forward an app left in the middle of something. A walk of its own begins at the real entry screen, which is also what tells needed writes (signing in) from accidental ones.
+   const first=run.observations.at(-1);if(graph.entries?.[run.target]!==first.stateId){if(this.executor.restart)await this.restart(run);else{graph=await this.store.graph();graph.entries??={};graph.entries[run.target]=first.stateId;await this.store.saveGraph(graph);}run=await this.store.run(run.id);}}
+  const id=run.id,began=Date.now(),origin=run.observations.at(-1);if(goals.has(origin.stateId))return {status:'already_there',steps:0,runId:id,started,observation:origin};
+  const results=[],avoid=new Set(),tried=new Map(),walked=new Map(),filled=new Set(),allowBack=config.permissions.actions.includes('back'),limit=Math.min(80,run.limits.steps);
+  let backs=0,blanks=0,restarted=false,recoveries=0,errors=0,status='stuck',reason='Step limit of one goto reached';
+  while(results.length+recoveries<limit){
+   run=await this.store.run(id);if(run.status!=='running'||this.active!==id){status=run.status==='running'?'stuck':run.status;reason=run.stopReason;break;}
+   const here=run.observations.at(-1);graph=await this.store.graph();const decisions=build(graph,avoid),choice=decisions.decide(here);
+   if(choice?.kind==='arrived'){status='arrived';break;}
+   // When starting over at the entry screen is clearly shorter than the way from here (which may run through purchases and the like), start over.
+   const fromEntry=decisions.left.get(graph.entries?.[run.target]);if(choice&&!restarted&&fromEntry!==undefined&&choice.left>fromEntry+2){restarted=true;recoveries++;try{await this.restart(run);}catch(e){reason=e.message;break;}continue;}
+   if(!choice&&!here.elements.length&&blanks<4){blanks++;await new Promise(r=>setTimeout(r,700));await this.captureRun(run);continue;}
+   if(!choice){
+    // Unknown ground. A mission that has just opened the app is already at the entry screen: going back or restarting would change nothing.
+    const moved=results.length||recoveries||!started;
+    if(moved&&allowBack&&backs<2&&(!this.executor.canGoBack||await this.executor.canGoBack().catch(()=>true))){backs++;recoveries++;const back=await this.step(id,{type:'back'},{replay:true,soft:true});if(['blocked','paused'].includes(back.status)){status=back.status;reason=back.reason;break;}continue;}
+    if(moved&&!restarted){restarted=true;recoveries++;try{await this.restart(run);}catch(e){reason=e.message;break;}continue;}
+    reason='No known action leads from this screen to the destination';break;}
+   const edge=choice.edge,key=here.stateId+edge.id,count=(tried.get(key)??0)+1;tried.set(key,count);if(count>2){avoid.add(edge.id);continue;}
+   try{
+    if(edge.action.type==='click'&&!filled.has(here.screenId+edge.id)){filled.add(here.screenId+edge.id);for(const fill of await this.fillsBefore(graph,edge)){const typed=await this.follow(id,fill,{verify:false}).catch(()=>null);if(typed)results.push(typed);}}
+    const result=await this.follow(id,edge,{verify:!results.length,expectedState:['screen','global'].includes(choice.kind)?undefined:edge.to});results.push(result);
+    if(!['screen','global'].includes(choice.kind)){const tally=walked.get(edge.id)??{walks:0,misses:0};tally.walks++;if(result.status!=='completed')tally.misses++;walked.set(edge.id,tally);}
+    if(['blocked','paused'].includes(result.status)){status=result.status;reason=result.reason;break;}
+    // A link that lands elsewhere, or a control that changes nothing, is not asked again in this walk.
+    if((result.status==='diverged'&&choice.kind==='deeplink')||(result.observation?.stateId===here.stateId&&edge.action.type!=='wait'))avoid.add(edge.id);
+   }catch(e){reason=e.message;if(++errors>4)break;if(!/Screen changed|Stale observation/.test(e.message))avoid.add(edge.id);try{await this.captureRun(await this.live(id));}catch{}}
+  }
+  // Loading states settle through recorded waits; follow them so the caller lands on the usable state.
+  if(status==='arrived')for(let i=0;i<3;i++){const here=(await this.store.run(id)).observations.at(-1),settle=graph.transitions.find(e=>e.from===here.stateId&&e.confirmed&&e.action.type==='wait'&&e.to!==here.stateId&&goals.has(e.to)&&e.target===run.target&&e.profile===run.profile);if(!settle)break;const settled=await this.follow(id,settle,{verify:false,expectedState:settle.to}).catch(()=>null);if(settled?.status!=='completed')break;results.push(settled);}
+  const final=await this.store.run(id),observation=final.observations.at(-1),ms=Date.now()-began;graph=await this.store.graph();graph.routes??={};
+  for(const [edgeId,tally] of walked){const edge=graph.transitions.find(e=>e.id===edgeId);if(edge){edge.walks=(edge.walks??0)+tally.walks;edge.misses=(edge.misses??0)+tally.misses;}}
+  const memo=graph.routes[wanted.id]??={runs:0,arrived:0};memo.runs++;if(status==='arrived'){memo.arrived++;memo.bestSteps=Math.min(memo.bestSteps??Infinity,results.length);delete memo.stuckAt;delete memo.stuckReason;}else Object.assign(memo,{stuckAt:observation.screenId,stuckReason:reason});
+  Object.assign(memo,{lastAt:now(),lastStatus:status,lastSteps:results.length,lastMs:ms,lastRecoveries:recoveries,lastFrom:origin.screenId});await this.store.saveGraph(graph);
+  return {status,steps:results.length,ms,recoveries,runId:id,started,...(status==='arrived'?{}:{reason,hint:'Continue from here with step. Every confirmed action joins the decision graph, so the next goto goes further on its own.'}),runStatus:final.status,results,observation};}
  /** One screen in a few lines, built from what is already recorded: no device access and no agent reasoning needed. */
  async screenContext({screen:ref}){const graph=await this.store.graph(),config=await this.store.config(),screen=resolveScreen(graph,ref),target=config.targets[screen.target],states=graph.states.filter(s=>s.screenId===screen.id),state=states.at(-1);let observation;try{observation=state&&JSON.parse((await this.store.resource(`evidence/${state.lastSeen}.json`)).toString());}catch{}
   return screenContext(graph,screen,{observation,appId:target?.package??target?.url,platform:target?.platform,stateLabel:state?.name,stateLabels:[...new Set(states.map(s=>s.name))]});}

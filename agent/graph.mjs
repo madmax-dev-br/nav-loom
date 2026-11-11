@@ -63,13 +63,18 @@ export function confirmTransition(graph,before,after,action,step,run,effects={})
  * - when the same action from the same state has led to different places, only its best-evidenced outcome is used;
  * - `back` depends on the back stack, so it is only used to undo the step that precedes it in the route;
  * - a deeplink may start from anywhere (navigation only), unless it has been seen landing in more than one place.
+ *   A landing that was itself a surprise (the link was expected elsewhere) does not count: it is a failed attempt, not a second destination.
  */
-export function planRoute(graph,{from,to,target,profile,preconditions={},version,allowUnverifiedVersion=false,allowDeeplinks=false}){
- const goals=to instanceof Set?to:new Set([to]),wanted=hash(preconditions);
+/** Confirmed transitions a route may rely on, keeping only the best-evidenced outcome of each action; and where each deeplink has landed. */
+export function dependableEdges(graph,{target,profile,preconditions={},version,allowUnverifiedVersion=false}){
+ const wanted=hash(preconditions);
  const usable=graph.transitions.filter(e=>e.confirmed&&e.target===target&&e.profile===profile&&hash(e.preconditions)===wanted&&!e.action.point&&(allowUnverifiedVersion||e.version?.fingerprint===version?.fingerprint));
  const weight=e=>(e.evidence??[]).filter(x=>!x.diverged).length,outcomes=new Map(),landings=new Map();
- for(const edge of usable){const key=edge.from+JSON.stringify(edge.action),best=outcomes.get(key);if(!best||weight(edge)>=weight(best))outcomes.set(key,edge);if(edge.action.type==='deeplink')landings.set(edge.action.url,(landings.get(edge.action.url)??new Set()).add(edge.to));}
- const edges=usable.filter(e=>outcomes.get(e.from+JSON.stringify(e.action))===e||e.to===outcomes.get(e.from+JSON.stringify(e.action)).to);
+ for(const edge of usable){const key=edge.from+JSON.stringify(edge.action),best=outcomes.get(key);if(!best||weight(edge)>=weight(best))outcomes.set(key,edge);if(edge.action.type==='deeplink'&&weight(edge))landings.set(edge.action.url,(landings.get(edge.action.url)??new Set()).add(edge.to));}
+ return {edges:usable.filter(e=>outcomes.get(e.from+JSON.stringify(e.action))===e||e.to===outcomes.get(e.from+JSON.stringify(e.action)).to),landings};
+}
+export function planRoute(graph,{from,to,target,profile,preconditions={},version,allowUnverifiedVersion=false,allowDeeplinks=false}){
+ const goals=to instanceof Set?to:new Set([to]),{edges,landings}=dependableEdges(graph,{target,profile,preconditions,version,allowUnverifiedVersion});
  const queue=[{state:from,previous:null,path:[],cost:0}],best=new Map();
  while(queue.length){queue.sort((a,b)=>a.cost-b.cost);const current=queue.shift();if(goals.has(current.state))return {found:true,steps:current.path,cost:current.cost,to:current.state};if((best.get(current.state)??Infinity)<=current.cost)continue;best.set(current.state,current.cost);
  for(const edge of edges){const shortcut=allowDeeplinks&&edge.action.type==='deeplink'&&landings.get(edge.action.url).size===1;if(edge.from!==current.state&&!shortcut)continue;

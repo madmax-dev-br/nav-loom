@@ -39,5 +39,6 @@ export class WebExecutor{
  }
  async diagnostics(){return {logs:this.logs.slice(-500),blockedRequests:this.blocked.slice(-100),availability:'available'};}
  async build(){return {reportedBuild:this.target.buildId??null,verified:false};}
+ async restart(){await this.page.goto(this.target.url,{waitUntil:'domcontentloaded'});}
  async close(){await this.browser?.close();}
 }

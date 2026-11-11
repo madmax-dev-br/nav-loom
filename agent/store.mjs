@@ -7,7 +7,7 @@ export const now=()=>new Date().toISOString();
 export const uid=()=>randomUUID();
 export const hash=value=>createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex').slice(0,24);
 export async function safePath(root,path){const base=await realpath(root);const file=await realpath(resolve(base,path));const rel=relative(base,file);if(rel.startsWith('..')||isAbsolute(rel))throw Error('Path is outside the configured root');return file;}
-export const emptyGraph=()=>({version:2,flows:[],screens:[],states:[],transitions:[],deeplinks:[],declaredDeeplinks:{},harness:[],endpointLinks:{},descriptions:[],legacy:[],extensions:{},presentation:{pinned:{},plugins:{}}});
+export const emptyGraph=()=>({version:2,flows:[],screens:[],states:[],transitions:[],deeplinks:[],declaredDeeplinks:{},harness:[],routes:{},entries:{},endpointLinks:{},descriptions:[],legacy:[],extensions:{},presentation:{pinned:{},plugins:{}}});
 /** Graphs written before declared and verified deeplinks were kept apart: `deeplinks` held the declared patterns per target. */
 function upgrade(graph){
  if(graph.deeplinks&&!Array.isArray(graph.deeplinks)){graph.declaredDeeplinks={...graph.deeplinks,...graph.declaredDeeplinks};graph.deeplinks=graph.screens.flatMap(screen=>(screen.deeplinks??[]).map(d=>({url:d.url,target:screen.target,screenId:screen.id,stateId:d.state,verifiedAt:null,runId:null,observationId:null})));}

@@ -16,7 +16,7 @@ async function call(name,args={},headers={}){const {port,token}=JSON.parse(await
 const instructions=`Navloom maps an application by driving it for you and remembers every confirmed path.
 1. Call navloom_memory once: it lists known screens, connections, API calls, deeplinks and remembered help.
 2. navloom_start opens the app and returns the first screen. Every step/goto/replay returns the resulting screen, so do not call navloom_observe after them.
-3. To reach a known screen use navloom_goto (one call) instead of repeating steps. Step manually only through unknown territory; navloom_explore probes pending candidates in a batch.
+3. To reach a known screen call navloom_goto {screen}: it follows the learned decision graph by itself and opens a mission if none is active (no start/observe needed). If it returns stuck, continue from the returned screen with navloom_step; that path is learned for next time. Step manually only through unknown territory; navloom_explore probes pending candidates in a batch.
 4. Ids may be passed in the short form you received. Pass detail="digest" when you need the text graph of a screen with pixel boxes.
 5. When you cannot proceed (a credential, a value only a person knows, a decision), call navloom_ask; the answer is remembered for later runs.
 6. When you notice a stable pattern Navloom misses (the app logs its requests in its own format, a screen changes text but is the same screen), read navloom_harness and register a small script with navloom_harness_propose. A person approves it; later runs then recognise it deterministically.

@@ -47,7 +47,7 @@ export async function briefStart(run,store){
 export async function briefMove(result,store){
  const graph=await store.graph(),steps=result.results??[],last=result.observation??steps.findLast(r=>r.observation)?.observation;
  const api=steps.flatMap(r=>r.step?.network??[]).map(apiLabel);
- return {status:result.status,steps:typeof result.steps==='number'?result.steps:steps.length,...(result.planned?{planned:result.planned}:{}),...(result.reason?{reason:result.reason}:{}),...(result.at?{stoppedAt:result.at}:{}),...(api.length?{api:[...new Set(api)].slice(0,20)}:{}),...(last?briefObservation(last,graph):{})};
+ return {status:result.status,steps:typeof result.steps==='number'?result.steps:steps.length,...(result.planned?{planned:result.planned}:{}),...(result.started?{runId:result.runId}:{}),...(result.recoveries?{recoveries:result.recoveries}:{}),...(result.hint?{hint:result.hint}:{}),...(result.reason?{reason:result.reason}:{}),...(result.at?{stoppedAt:result.at}:{}),...(api.length?{api:[...new Set(api)].slice(0,20)}:{}),...(last?briefObservation(last,graph):{})};
 }
 
 export function briefRun(run,graph){

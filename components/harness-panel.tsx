@@ -1,5 +1,5 @@
 'use client';
-import {Bot,Braces,Check,CircleDashed,Eye,FileCode2,GitBranch,Link2,MousePointerClick,ScrollText,Sparkles,X} from 'lucide-react';
+import {Bot,Braces,Check,CircleDashed,Eye,FileCode2,GitBranch,Link2,MousePointerClick,Route,ScrollText,Sparkles,X} from 'lucide-react';
 import {apiText} from '@/components/agent-map';
 import {splitApis} from '@/lib/api-role.mjs';
 
@@ -20,6 +20,8 @@ export function HarnessPanel({data,graph,busy,onReview}:{data?:Obj;graph:Obj;bus
  const apis=new Set<string>(graph.transitions.flatMap((t:Obj)=>(t.apis??[]).map(apiText)));
  const steps=runs.reduce((n,r)=>n+r.steps.length,0),reused=runs.reduce((n,r)=>n+(r.metrics?.replayedSteps??0),0);
  const matches=scripts.reduce((n,s)=>n+(s.stats?.matches??0),0),activeScripts=scripts.filter(s=>s.status==='active').length,waiting=scripts.filter(s=>s.status==='proposed').length;
+ const nameOf=(id?:string)=>graph.screens.find((x:Obj)=>x.id===id)?.name??'uma tela desconhecida';
+ const routes:Obj[]=Object.entries((graph.routes??{}) as Record<string,Obj>).map(([id,memo]):Obj=>({id,name:nameOf(id),...memo})).sort((x,y)=>String(y.lastAt).localeCompare(String(x.lastAt)));
  const targets=Object.values(config?.targets??{}) as Obj[],declared=Object.values(graph.declaredDeeplinks??{}).flat() as Obj[];
  const stages=[
   {icon:Bot,title:'Agente',text:'Um agente externo decide o que fazer e fala com o Navloom por MCP.',value:`${runs.length} ${runs.length===1?'missão':'missões'}`},
@@ -52,6 +54,13 @@ export function HarnessPanel({data,graph,busy,onReview}:{data?:Obj;graph:Obj;bus
      {flow.screenIds.some((id:string)=>graph.screens.find((s:Obj)=>s.id===id)?.deeplinks?.length)&&<p className="harness-entry"><Link2 size={12}/>Entradas por deeplink: {flow.screenIds.flatMap((id:string)=>graph.screens.find((s:Obj)=>s.id===id)?.deeplinks??[]).map((d:Obj)=>d.url).join(', ')}</p>}</article>;})
     :<p className="agent-quiet">Nenhum fluxo ainda. O agente agrupa telas em fluxos ao terminar uma exploração.</p>}</section>
   </div>
+
+  <section className="harness-card"><div className="harness-card-title"><h3><Route size={15}/> Rotas diretas</h3><span>{routes.length?`${routes.filter(r=>r.lastStatus==='arrived').length} de ${routes.length} chegaram na última vez`:''}</span></div>
+   <p className="harness-note">Para cada tela já mapeada, o Navloom monta um grafo de decisão: em cada estado conhecido, qual ação leva mais perto. Chegar lá não usa o agente; ele só é chamado quando o app cai em terreno desconhecido, e o passo que ele der entra no grafo.</p>
+   {routes.length?<ul className="harness-routes">{routes.map(r=><li key={r.id}><strong>{r.name}</strong><span className={'harness-status '+(r.lastStatus==='arrived'?'is-active':'is-proposed')}>{r.lastStatus==='arrived'?'Chegou':'Parou'}</span>
+     <span>{r.arrived} de {r.runs} {r.runs===1?'tentativa':'tentativas'}</span><span>{r.lastSteps} {r.lastSteps===1?'passo':'passos'} · {(r.lastMs/1000).toFixed(1)} s{r.lastRecoveries?` · ${r.lastRecoveries} ${r.lastRecoveries===1?'recuperação':'recuperações'}`:''}</span>
+     <small>{r.lastStatus==='arrived'?`Saindo de ${nameOf(r.lastFrom)}, sem chamadas ao agente.`:`Parou em ${nameOf(r.stuckAt)}: daqui o agente continua, e o caminho fica aprendido.`}</small></li>)}</ul>
+   :<p className="agent-quiet">Nenhuma rota direta usada ainda. Quando o agente pedir para ir a uma tela conhecida, o resultado aparece aqui.</p>}</section>
 
   <section className="harness-card"><div className="harness-card-title"><h3>Scripts aprendidos</h3><span>{activeScripts} ativos{waiting?` · ${waiting} aguardando você`:''} · {matches} reconhecimentos</span></div>
    <p className="harness-note">O agente propõe; nada escrito por ele roda antes da sua aprovação. Ao aprovar, os exemplos são executados e o script só é ativado se todos conferirem.</p>
