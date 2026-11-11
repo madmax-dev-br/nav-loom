@@ -76,3 +76,4 @@ tsconfig.tsbuildinfo
 
 **/.navloom/plugins/active.json
 **/.navloom/plugins/pins.json
+**/.navloom/imported.json

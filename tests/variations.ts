@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import {demo,flowSchema,readFlow,writeFlow,problems} from '../lib/flow';
+import {flowSchema,readFlow,writeFlow,problems} from '../lib/flow';
+import {sample as demo} from './fixtures/sample-flow';
 import {conditionsMatch,variationFor,effectiveVariant,actionArea,actionAvailable,isWholeScreen} from '../lib/variations';
 import {tapOrigin} from '../lib/connector-geometry';
 const f=structuredClone(demo),base=f.screens[0].variants.web;

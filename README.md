@@ -87,7 +87,7 @@ Principais operações:
 | `navloom_annotate`, `navloom_group_flow` | Descrições de negócio e agrupamentos |
 | `navloom_finish`, `navloom_compare` | Verificações, diagnóstico e comparação |
 
-Para testar um fluxo específico, prefira `scenarioRunId` e o intervalo de passos ao planejar a reprodução. Chegar ao mesmo recibo por outro caminho não prova que o fluxo solicitado foi executado. O exemplo `node scripts/agent-demo.mjs examples/agent-project` usa um roteiro conhecido para demonstrar a integração; não é uma exploração autônoma.
+Para testar um fluxo específico, prefira `scenarioRunId` e o intervalo de passos ao planejar a reprodução. Chegar ao mesmo recibo por outro caminho não prova que o fluxo solicitado foi executado.
 
 ## Android de demonstração
 

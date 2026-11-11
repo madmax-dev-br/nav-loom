@@ -4,7 +4,21 @@
     {
       "name": "navloom",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "navloom-android-lab",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "NAVLOOM_AGENT_PROJECT=work/android-lab",
+        "node",
+        "scripts/run-framework.mjs",
+        "dev"
+      ],
       "port": 5173
     }
   ]

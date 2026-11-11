@@ -1,3 +1,4 @@
+import {splitApis,screenApis} from '../lib/api-role.mjs';
 /** Compact projections returned to external agents. The interface keeps reading the full records. */
 const short=id=>id?String(id).slice(0,8):id;
 const clip=(text,max)=>{const value=String(text??'').replace(/\s+/g,' ').trim();return value.length>max?value.slice(0,max-1)+'…':value;};
@@ -9,7 +10,7 @@ export function briefObservation(o,graph,previous){
  if(!o)return null;
  const screen=graph.screens.find(s=>s.id===o.screenId),elements=usable(o);
  const out={observationId:o.id,screen:{id:short(o.screenId),name:screen?.name},state:short(o.stateId)};
- if(o.stateKey)out.stateKey=o.stateKey;if(o.hierarchy==='unavailable')out.hierarchy='unavailable';
+ const stateName=graph.states.find(s=>s.id===o.stateId)?.name;if(stateName&&stateName!==o.stateKey)out.stateName=stateName;else if(o.stateKey)out.stateKey=o.stateKey;if(o.hierarchy==='unavailable')out.hierarchy='unavailable';
  if(previous&&previous.stateId===o.stateId&&usable(previous).map(e=>e.id).join()===elements.map(e=>e.id).join()){out.unchanged='Same state and elements as the previous observation.';return out;}
  // Repeated labels (list rows) are told apart by their test tag.
  const seen=new Map();for(const e of elements){const label=e.label||e.name;seen.set(label,(seen.get(label)??0)+1);}
@@ -55,10 +56,10 @@ export function briefRun(run,graph){
 /** The project map an agent needs before acting: screens, how they connect, entries and what is still unknown. */
 export function briefMemory(memory){
  const {config,graph}=memory,many=Object.keys(config.targets).length>1,edges=new Map();
- for(const t of graph.transitions){if(!t.confirmed)continue;const from=screenOf(graph,t.from),to=screenOf(graph,t.to);if(!from||!to||from.id===to.id)continue;const key=[from.id,to.id,t.name].join('>');const entry=edges.get(key)??{from,to,via:t.name,apis:new Set()};for(const api of t.apis??[])entry.apis.add(`${api.method} ${api.path}`);edges.set(key,entry);}
+ for(const t of graph.transitions){if(!t.confirmed)continue;const from=screenOf(graph,t.from),to=screenOf(graph,t.to);if(!from||!to||from.id===to.id)continue;const key=[from.id,to.id,t.name].join('>');const entry=edges.get(key)??{from,to,via:t.name,apis:new Set()};for(const api of splitApis(graph,t).action)entry.apis.add(`${api.method} ${api.path}`);edges.set(key,entry);}
  return {project:{id:config.id,name:config.name,...(config.description?{description:clip(config.description,300)}:{}),targets:Object.fromEntries(Object.entries(config.targets).map(([id,t])=>[id,t.platform==='android'?`android ${t.package}`:`web ${t.url}`])),profiles:Object.fromEntries(Object.entries(config.profiles).map(([id,p])=>[id,Object.keys(p.secrets)])),actions:config.permissions.actions,limits:config.limits,repositories:config.repositories.map(r=>r.id)},
   ...(memory.skills.length?{skills:memory.skills}:{}),
-  screens:graph.screens.map(s=>({id:short(s.id),name:s.name,...(many?{target:s.target}:{}),...(s.description?{description:clip(s.description,220)}:{}),...(s.deeplinks?.length?{deeplinks:s.deeplinks.map(d=>d.url)}:{})})),
+  screens:graph.screens.map(s=>({id:short(s.id),name:s.name,...(many?{target:s.target}:{}),...(s.description?{description:clip(s.description,220)}:{}),...(s.fragment?{fragment:s.fragment}:{}),...(s.header&&s.header!==s.name?{header:s.header}:{}),...(s.deeplinks?.length?{deeplinks:s.deeplinks.map(d=>d.url)}:{}),...(screenApis(graph,s.id).load.length?{loads:screenApis(graph,s.id).load.map(a=>`${a.method} ${a.path}`)}:{})})),
   transitions:[...edges.values()].slice(0,300).map(e=>`${e.from.name} —${clip(e.via,40)}→ ${e.to.name}${e.apis.size?' ['+[...e.apis].slice(0,6).join(', ')+']':''}`),
   ...(graph.flows?.length?{flows:graph.flows.map(f=>({id:f.id,name:f.name,screens:f.screenIds.map(id=>graph.screens.find(s=>s.id===id)?.name)}))}:{}),
   ...(Object.keys(graph.deeplinks??{}).length?{declaredDeeplinks:Object.fromEntries(Object.entries(graph.deeplinks).map(([target,list])=>[target,list.map(d=>d.pattern+(d.match==='prefix'?'*':''))]))}:{}),

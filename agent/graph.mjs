@@ -1,16 +1,39 @@
 import {hash,now,uid} from './store.mjs';
 import {mergeApis} from './network.mjs';
 const humanize=key=>key?String(key).replace(/[-_]+/g,' ').replace(/^./,c=>c.toUpperCase()):'';
+/** `ProductDetailFragment` → `Product detail`. */
+const fromFragment=name=>name?name.replace(/Fragment$/,'').replace(/([a-z0-9])([A-Z])/g,'$1 $2').replace(/^(.)(.*)$/,(_,a,b)=>a.toUpperCase()+b.toLowerCase()):'';
+/** What is on view right now: the visible controls and, where the platform reports it, the scroll offset. */
+export const viewSignature=observation=>hash([(observation.elements??[]).filter(e=>e.visible!==false).map(e=>e.identity),observation.scroll?.x??null,typeof observation.scroll?.y==='number'?observation.scroll.y:null]);
 export function identity(observation,target){
- const screenKey=observation.screenKey||[observation.route,observation.heading];
+ // Without an id declared by the app, a fragment is the most stable name a screen has; the header text comes next.
+ const screenKey=observation.screenKey||(observation.fragment?['fragment',observation.fragment]:[observation.route,observation.heading]);
  const structural=observation.elements.map(e=>e.identity).sort();
- return {screenId:hash([target,screenKey]),stateId:observation.scrollOfState??hash([target,screenKey,observation.stateKey||[observation.heading,structural,observation.stateMarkers]])};
+ const parts=[target,screenKey,observation.stateKey||[observation.heading,structural,observation.stateMarkers]];
+ // The same screen with the keyboard up is a state of its own, so its capture never replaces the clean one.
+ if(observation.keyboard)parts.push('keyboard');
+ return {screenId:hash([target,screenKey]),stateId:observation.stateOverride??hash(parts)};
+}
+/**
+ * A scrolled view is a state of its own, reached from the unscrolled one. Called right after a scroll:
+ * nothing moved → same state; back at the top → the base state; anything else → the scrolled state for that view.
+ * A plain observation made while still scrolled keeps the scrolled state.
+ */
+export function placeScroll(graph,observation,target,scrolledFrom,previous){
+ const natural=identity(observation,target).stateId,view=viewSignature(observation);observation.naturalState=natural;
+ if(!scrolledFrom){if(previous?.scrollBase&&previous.naturalState===natural&&viewSignature(previous)===view){observation.stateOverride=previous.stateId;observation.scrollBase=previous.scrollBase;observation.stateName=previous.stateName;}return;}
+ const base=scrolledFrom.scrollBase??scrolledFrom.stateId,root=graph.states.find(s=>s.id===base);
+ if(view===viewSignature(scrolledFrom)){observation.stateOverride=scrolledFrom.stateId;observation.scrollBase=scrolledFrom.scrollBase;observation.stateName=scrolledFrom.stateName;return;}
+ if(root?.viewSig===view){observation.stateOverride=base;return;}
+ observation.stateOverride=hash([base,'scroll',view]);observation.scrollBase=base;observation.stateName=`${root?.name??'estado'} · rolado`;
 }
 export function recordObservation(graph,observation,run){
  const keys=identity(observation,run.target);Object.assign(observation,keys);
  let screen=graph.screens.find(s=>s.id===keys.screenId);
- if(!screen){screen={id:keys.screenId,target:run.target,name:humanize(observation.screenKey)||observation.heading||observation.title||observation.route,description:'',route:observation.route,identity:observation.screenKey?'explicit':'structural',sources:[],createdAt:now()};graph.screens.push(screen);}
- let state=graph.states.find(s=>s.id===keys.stateId);if(!state){state={id:keys.stateId,screenId:screen.id,name:observation.stateKey||observation.heading||'Observed state',firstSeen:observation.id,lastSeen:observation.id};graph.states.push(state);}state.lastSeen=observation.id;
+ if(!screen){screen={id:keys.screenId,target:run.target,name:observation.screenName||fromFragment(observation.fragment)||humanize(observation.screenKey)||observation.header||observation.heading||observation.title||observation.route,description:'',route:observation.route,identity:observation.screenKey?'explicit':observation.fragment?'fragment':'structural',sources:[],createdAt:now()};graph.screens.push(screen);}
+ // What the app itself calls this screen; kept current so details and agent context can show it.
+ if(observation.fragment&&screen.fragment!==observation.fragment)screen.fragment=observation.fragment;if(observation.header&&screen.header!==observation.header)screen.header=observation.header;
+ let state=graph.states.find(s=>s.id===keys.stateId);if(!state){const plain=observation.stateKey||observation.heading||'Observed state';state={id:keys.stateId,screenId:screen.id,name:observation.stateName||(observation.keyboard?`${plain} · teclado`:plain),firstSeen:observation.id,lastSeen:observation.id,...(observation.scrollBase?{scrollOf:observation.scrollBase}:{}),...(observation.keyboard?{keyboard:true}:{})};graph.states.push(state);}state.lastSeen=observation.id;if(!observation.scrollBase&&!state.viewSig)state.viewSig=viewSignature(observation);
  for(const element of observation.elements){if(!element.actions?.length||element.disabled)continue;const key=hash([observation.stateId,element.identity]);if(!run.frontier.some(f=>f.key===key))run.frontier.push({key,stateId:observation.stateId,elementIdentity:element.identity,label:element.label||element.name,actions:element.actions,status:'pending',observationId:observation.id,elementId:element.id});}
  return keys;
 }
