@@ -151,3 +151,15 @@
 .canvas-view-switch{display:flex;padding:3px;background:#f3f0f9;border-radius:8px;gap:2px}.canvas-view-switch button{border:0;background:transparent;padding:6px 9px;border-radius:6px;color:#8a7d9c;font-size:11px;white-space:nowrap}.canvas-view-switch button[aria-pressed=true]{background:white;color:#6343bb;box-shadow:0 1px 4px #35265314}.journey-links{display:grid;gap:6px;padding:0 12px 16px;margin-top:-14px}.journey-links button{width:100%;display:flex;align-items:center;gap:9px;text-align:left;padding:11px 12px;border:1px solid #e7e1f0;border-radius:8px;background:white;font-size:12px;color:#695482}.journey-links .journey-states{background:#f0f7f4;border-color:#dbeae3;color:#347c68;justify-content:space-between;margin-bottom:6px}.journey-action strong{font-weight:500}.journey-links button:hover,.journey-links button:focus-visible{border-color:#9371d4;background:#f2edfb;outline:2px solid #9371d420}.journey-action>span{color:#9271ce}
 
 .journey-action>div{display:grid;gap:4px}.journey-action small{color:#998ca7;font-size:10px}
+
+/* Shared Navloom workbench styling. */
+:root{--primary:#246bce;--ring:#246bce;--accent:#eaf2fc;--accent-foreground:#205ca8;--sidebar-primary:#246bce;--sidebar-accent:#eaf2fc;--sidebar-accent-foreground:#205ca8;--foreground:#243746;--muted-foreground:#647785;--border:#dce4eb}
+body{font-family:"Avenir Next","Segoe UI",sans-serif}
+.brand{color:#18344b;font-size:24px;letter-spacing:-.8px}.brand-icon{background:#18344b}
+.main .topbar{background:#18344b;border:0;color:white}.topbar .breadcrumb,.topbar .breadcrumb strong,.topbar .draft-label{color:#d4e1eb}
+.main .flow-heading{padding:24px 30px}.flow-heading h1{font-size:30px;letter-spacing:-1px}.flow-heading p{color:#647785}
+.button.primary{background:#246bce;border-color:#246bce;box-shadow:none}.button.primary:hover{background:#1b57aa}
+.canvas{background-color:#f3f6f8;background-image:radial-gradient(#cbd9e3 .8px,transparent .8px)}
+.nav-label,.eyebrow{letter-spacing:0;color:#647785}.flow-nav.active{background:#eaf2fc;border-color:#246bce;color:#205ca8}
+.canvas-toolbar{background:#fff}.statusbar{background:#f3f6f8}
+@media(prefers-reduced-motion:reduce){button{transition:none}}

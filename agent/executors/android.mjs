@@ -1,12 +1,26 @@
 import {command} from '../process.mjs';
 import {hash,now} from '../store.mjs';
-const decode=s=>s.replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
-export function parseHierarchy(xml,viewport){return [...xml.matchAll(/<node\b([^>]+)>?/g)].map((match,index)=>{const a=Object.fromEntries([...match[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(m=>[m[1],decode(m[2])]));const b=a.bounds?.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/)?.slice(1).map(Number);if(!b)return null;const name=a['content-desc']||a.text||a['resource-id']||a.class,identity=[a['resource-id']||`${a.class}:${index}`,a.class,name].join('|');return {id:hash(identity),identity,name,role:a.class,resourceId:a['resource-id'],contentDescription:a['content-desc'],text:a.text,disabled:a.enabled==='false',sensitive:a.password==='true',actions:[...(a.clickable==='true'?['click']:[]),...(a.class?.includes('EditText')?['fill']:[]),...(a.scrollable==='true'?['scroll']:[])],bounds:{x:b[0]/viewport.width,y:b[1]/viewport.height,width:(b[2]-b[0])/viewport.width,height:(b[3]-b[1])/viewport.height},visible:b[2]>b[0]&&b[3]>b[1]};}).filter(Boolean);}
+import {CallLog,recordingProxy,parseHttpLog} from '../network.mjs';
+const decode=s=>s.replace(/&#(x?)([0-9a-fA-F]+);/g,(_,hex,code)=>String.fromCodePoint(parseInt(code,hex?16:10))).replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+export function parseHierarchy(xml,viewport){return [...xml.matchAll(/<node\b([^>]+)>?/g)].map((match,index)=>{const a=Object.fromEntries([...match[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(m=>[m[1],decode(m[2])]));const b=a.bounds?.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/)?.slice(1).map(Number);if(!b)return null;const name=a['content-desc']||a.text||a['resource-id']||a.class,identity=[a['resource-id']||`${a.class}:${index}`,a.class,name].join('|');return {id:hash(identity),identity,name,role:a.class,resourceId:a['resource-id'],contentDescription:a['content-desc'],text:a.text,disabled:a.enabled==='false',sensitive:a.password==='true',actions:[...(a.clickable==='true'?['click']:[]),...(a.class?.includes('EditText')?['fill']:[]),...(a.scrollable==='true'?['scroll']:[])],bounds:{x:b[0]/viewport.width,y:b[1]/viewport.height,width:(b[2]-b[0])/viewport.width,height:(b[3]-b[1])/viewport.height},visible:b[2]>b[0]&&b[3]>b[1],box:b};}).filter(Boolean).map((node,index,all)=>{const {box,...element}=node;const own=element.contentDescription||element.text;/* Compose rows are clickable containers; their readable label lives in the children. */const inner=own?[]:all.slice(index+1).filter(o=>o.text&&o.box[0]>=box[0]&&o.box[1]>=box[1]&&o.box[2]<=box[2]&&o.box[3]<=box[3]).slice(0,3).map(o=>o.text);const tag=element.resourceId?.split(/[:/]/).at(-1);/* A field shows its value; the tag says which field it is. */if(element.actions.includes('fill')&&tag)return {...element,label:element.sensitive?tag:`${tag}: ${element.text??''}`};return {...element,label:own||inner.join(' · ')||tag||element.role?.split('.').at(-1)};});}
+/** Deeplink patterns the application declares, read from the package resolver table. */
+export function parseDeeplinks(dump,pkg){
+ const found=new Map();let block=null;
+ const flush=()=>{if(block)for(const scheme of block.schemes){if(/^https?$/.test(scheme)&&!block.hosts.length)continue;for(const host of block.hosts.length?block.hosts:[''])for(const path of block.paths.length?block.paths:[{type:'PREFIX',value:''}]){const pattern=`${scheme}://${host}${path.value}`;found.set(pattern+path.type,{pattern,match:path.type.toLowerCase(),activity:block.activity});}}block=null;};
+ for(const line of dump.split('\n')){
+  const head=line.match(/^\s+[0-9a-f]+ (\S+\/\S+) filter [0-9a-f]+/);if(head){flush();block=head[1].startsWith(pkg+'/')?{activity:head[1],schemes:[],hosts:[],paths:[]}:null;continue;}
+  if(!block)continue;let m;
+  if((m=line.match(/^\s+Scheme: "([^"]+)"/)))block.schemes.push(m[1]);
+  else if((m=line.match(/^\s+Authority: "([^"]*)"/)))block.hosts.push(m[1]);
+  else if((m=line.match(/^\s+Path: "PatternMatcher\{(\w+): ([^}]*)\}"/)))block.paths.push({type:m[1],value:m[2]});
+ }
+ flush();return [...found.values()];
+}
 export class AndroidExecutor{
- constructor(target,{runCommand=command}={}){this.target=target;this.runCommand=runCommand;this.startedAt=now();}
+ constructor(target,{runCommand=command}={}){this.target=target;this.runCommand=runCommand;this.startedAt=now();this.log=new CallLog();this.proxies=[];}
  adb(args,options={}){return this.runCommand(this.target.adb,['-s',this.target.serial,...args],options);}
  async capabilities(){try{const state=await this.adb(['get-state']);if(state.trim()!=='device')throw Error('Device unavailable');await this.adb(['shell','pm','path',this.target.package]).then(s=>{if(!s.trim())throw Error('Application is not installed');});return {platform:'android',device:this.target.serial,available:['capture','interact','deeplink','logs','scroll','back'],conditional:['hierarchy'],missing:[]};}catch(e){return {platform:'android',device:this.target.serial,available:[],missing:['device_or_application'],error:e.message};}}
- async start(){const size=await this.adb(['shell','wm','size']);const pairs=[...size.matchAll(/(\d+)x(\d+)/g)];if(!pairs.length)throw Error('Cannot determine device viewport');const p=pairs.at(-1);this.viewport={width:Number(p[1]),height:Number(p[2])};this.startedAt=now();if(this.target.activity)await this.adb(['shell','am','start','-n',this.target.activity.includes('/')?this.target.activity:`${this.target.package}/${this.target.activity}`]);else await this.adb(['shell','monkey','-p',this.target.package,'-c','android.intent.category.LAUNCHER','1']);}
+ async start(){const size=await this.adb(['shell','wm','size']);const pairs=[...size.matchAll(/(\d+)x(\d+)/g)];if(!pairs.length)throw Error('Cannot determine device viewport');const p=pairs.at(-1);this.viewport={width:Number(p[1]),height:Number(p[2])};this.startedAt=now();await this.watchNetwork();if(this.target.activity)await this.adb(['shell','am','start','-n',this.target.activity.includes('/')?this.target.activity:`${this.target.package}/${this.target.activity}`]);else await this.adb(['shell','monkey','-p',this.target.package,'-c','android.intent.category.LAUNCHER','1']);}
  async observe(){const activity=await this.adb(['shell','dumpsys','activity','activities']);const focused=activity.split('\n').find(l=>/mResumedActivity|topResumedActivity/.test(l))?.trim()||this.target.package;if(!focused.includes(this.target.package))throw Error('Application lost foreground; navigation stopped');let xml='',hierarchy='available';try{await this.adb(['shell','uiautomator','dump','/sdcard/navloom-window.xml']);xml=await this.adb(['shell','cat','/sdcard/navloom-window.xml']);if(!xml.includes('<hierarchy'))throw Error('Hierarchy unavailable');}catch{hierarchy='unavailable';}const elements=parseHierarchy(xml,this.viewport);const route=focused.match(/[\w.]+\/[\w.$]+/)?.[0]||this.target.package;return {platform:'android',route,url:route,title:this.target.package,heading:elements.find(e=>e.text)?.text||'',screenKey:elements.map(e=>e.contentDescription?.match(/navloom:screen:([^:]+):state:([^\s]+)/)).find(Boolean)?.[1],stateKey:elements.map(e=>e.contentDescription?.match(/navloom:screen:([^:]+):state:([^\s]+)/)).find(Boolean)?.[2],stateMarkers:elements.filter(e=>/ProgressBar|Dialog/.test(e.role)).map(e=>e.role),text:elements.map(e=>e.text).filter(Boolean).join('\n'),elements,viewport:this.viewport,scroll:{position:'unknown',direction:this.lastScroll??null},hierarchy,xml,capturedAt:now()};}
  async capture(){return this.adb(['exec-out','screencap','-p'],{encoding:'buffer'});}
  async act(action,element){
@@ -19,6 +33,26 @@ export class AndroidExecutor{
  if(!point)throw Error('Verified element or explicit point required');const coords=[String(Math.round(point.x*this.viewport.width)),String(Math.round(point.y*this.viewport.height))];await this.adb(['shell','input','tap',...coords]);if(action.type==='fill'){if(!/^[\x20-\x7E]*$/.test(action.value??''))throw Error('ADB text input only supports ASCII; configure an input plugin for Unicode');await this.adb(['shell','input','keyevent','KEYCODE_MOVE_END']);await this.adb(['shell','input','keycombination','113','29']);await this.adb(['shell','input','text',shellQuote((action.value??'').replace(/ /g,'%s'))]);}}
  async diagnostics(){try{const pid=(await this.adb(['shell','pidof',this.target.package])).trim().split(' ')[0];if(!/^\d+$/.test(pid))return {availability:'partial',logs:[],reason:'Application process is no longer running; process logs cannot be attributed'};const output=await this.adb(['logcat','-d','-v','epoch',`--pid=${pid}`,'-t','1000']);const start=Date.parse(this.startedAt)/1000;return {availability:'available',logs:output.split('\n').filter(l=>Number(l.trim().split(/\s+/)[0])>=start).map(message=>({time:now(),level:/\s[EF]\s/.test(message)?'error':'info',message}))};}catch(e){return {availability:'unavailable',logs:[],reason:e.message};}}
  async build(){const data=await this.adb(['shell','dumpsys','package',this.target.package]);let apkHash=null;try{const path=(await this.adb(['shell','pm','path',this.target.package])).split('\n').find(p=>p.startsWith('package:'))?.slice(8);if(path)apkHash=(await this.adb(['shell','sha256sum',shellQuote(path)])).trim().split(/\s+/)[0];}catch{}return {apkHash,package:this.target.package,versionName:data.match(/versionName=(\S+)/)?.[1],versionCode:data.match(/versionCode=(\d+)/)?.[1],reportedBuild:this.target.buildId??null,verified:false};}
- async close(){}
+ /** Record backend calls: a loopback proxy for `adb reverse` backends, plus HTTP client log lines. */
+ async watchNetwork(){
+  if(this.watching)return;this.watching=true;
+  for(const entry of this.target.network?.reverse??[]){const proxy=await recordingProxy(entry.upstream,this.log);this.proxies.push({...proxy,devicePort:entry.devicePort});await this.adb(['reverse',`tcp:${entry.devicePort}`,`tcp:${proxy.port}`]);}
+  try{this.logSince=(await this.adb(['shell','date','+%s.000'])).trim();}catch{this.logSince=null;}
+ }
+ async pollLogcat(){
+  if(this.target.network?.logcat===false||!this.logSince)return;
+  try{const pid=(await this.adb(['shell','pidof',this.target.package])).trim().split(' ')[0];if(!/^\d+$/.test(pid))return;
+   const output=await this.adb(['logcat','-d','-v','epoch',`--pid=${pid}`,'-T',this.logSince]);
+   for(const line of output.split('\n')){const time=line.trim().split(/\s+/)[0];if(!/^\d+\.\d+$/.test(time)||Number(time)<=Number(this.logSince))continue;this.logSince=time;const entry=parseHttpLog(line);if(!entry)continue;if(entry.phase==='request')this.log.begin({method:entry.method,url:entry.url,source:'logcat'});else this.log.complete({url:entry.url,status:entry.status,ms:entry.ms,source:'logcat'});}
+  }catch{}
+ }
+ async network({quick=false}={}){if(!quick)await this.pollLogcat();return this.log.drain();}
+ async deeplinks(){try{return parseDeeplinks(await this.adb(['shell','dumpsys','package',this.target.package]),this.target.package);}catch{return [];}}
+ async close(){
+  for(const proxy of this.proxies.splice(0)){const local=['127.0.0.1','localhost'].includes(proxy.upstream.hostname)&&proxy.upstream.port;
+   // Hand the device port back to the backend it pointed at before recording started.
+   await this.adb(local?['reverse',`tcp:${proxy.devicePort}`,`tcp:${proxy.upstream.port}`]:['reverse','--remove',`tcp:${proxy.devicePort}`]).catch(()=>{});await proxy.close();}
+  this.watching=false;
+ }
 }
 function shellQuote(value){return "'"+value.replace(/'/g,"'\\''")+"'";}

@@ -9,7 +9,7 @@ export function AgentRoute({container,edge,highlighted=false,dimmed=false}:{cont
    if(!source||!destination){setDrawing(undefined);return;}
    const bounds=root.getBoundingClientRect(),scale=bounds.width/root.offsetWidth||1;
    const rect=(el:HTMLElement)=>{const r=el.getBoundingClientRect();return {x:(r.left-bounds.left)/scale,y:(r.top-bounds.top)/scale,width:r.width/scale,height:r.height/scale};};
-   const a=rect(source),b=rect(destination),forward=b.x>a.x,dir=forward?1:-1;
+   const a=rect(source.querySelector<HTMLElement>('.agent-image')??source),b=rect(destination.querySelector<HTMLElement>('.agent-image')??destination),forward=b.x>a.x,dir=forward?1:-1;
    const start={x:forward?a.x+a.width:a.x,y:a.y+a.height/2},end={x:forward?b.x:b.x+b.width,y:b.y+b.height/2};
    if(edge.origin==='interaction'){
     // Use the button in a displayed matching state, never stale coordinates on another capture.
@@ -19,7 +19,8 @@ export function AgentRoute({container,edge,highlighted=false,dimmed=false}:{cont
     const exactShot=shots.find(el=>edge.evidence.some((e:Obj)=>e.before===el.dataset.capture));
     if(hotspot){const r=rect(hotspot);start.x=forward?r.x+r.width:r.x;start.y=r.y+r.height/2;}
     else if(edge.point&&exactShot){const r=rect(exactShot);start.x=r.x+edge.point.x*r.width;start.y=r.y+edge.point.y*r.height;}
-    else if(recordedAction){const r=rect(recordedAction);start.x=forward?r.x+r.width:r.x;start.y=r.y+r.height/2;}
+    else if(recordedAction&&recordedAction.getClientRects().length){const r=rect(recordedAction);start.x=forward?r.x+r.width:r.x;start.y=r.y+r.height/2;}
+    else if(shots[0]){const r=rect(shots[0]);start.x=forward?r.x+r.width:r.x;start.y=r.y+r.height/2;}
     else{setDrawing(undefined);return;}
    }
    const cards=[...root.querySelectorAll<HTMLElement>('[data-graph-screen]')];

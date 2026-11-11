@@ -17,7 +17,9 @@ export async function createService({root,port=4788}){
  if(req.method!=='POST')return fail(405,'POST required');let body='';for await(const chunk of req){body+=chunk;if(body.length>2000000)return fail(413,'Request too large');}const parsed=JSON.parse(body||'{}'),owner=req.headers['x-navloom-client']||'interface';if(owner!=='interface')leases.set(owner,Date.now());
  if(url.pathname==='/pause'&&parsed.runId===runtime.active)runtime.interruptRequested=true;
  if(url.pathname==='/heartbeat'){res.end('{}');return;}if(url.pathname==='/disconnect'){await runtime.exclusive(()=>runtime.disconnect(owner));leases.delete(owner);res.end('{}');return;}
- const name=url.pathname.slice(1),op=ops[name];if(!op)return fail(404,'Operation not found');const args=op.schema.parse(parsed);const result=await runtime.exclusive(()=>op.call(args,owner));res.end(JSON.stringify(result));
+ const name=url.pathname.slice(1),op=ops[name];if(!op)return fail(404,'Operation not found');const args=op.schema.parse(parsed);const full=await runtime.exclusive(()=>op.call(args,owner));
+ // External agents get the compact projection; the local interface reads full records.
+ const result=owner!=='interface'&&op.brief?await op.brief(full,args):full;res.end(JSON.stringify(result));
  }catch(e){fail(400,e.message);}});
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});const address=server.address();await writeFile(join(runtime.store.dir,'runtime.json'),JSON.stringify({port:address.port,token,pid:process.pid,root:runtime.store.root}),{mode:0o600});
  const timer=setInterval(()=>{for(const [owner,last] of leases)if(Date.now()-last>45000){leases.delete(owner);runtime.exclusive(()=>runtime.disconnect(owner)).catch(()=>{});}},10000);timer.unref();

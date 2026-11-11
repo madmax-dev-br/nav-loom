@@ -25,6 +25,27 @@ Start the service before connecting MCP. It binds only to loopback and uses a lo
 
 ## Agent workflow
 
+The interface is a viewer: missions, navigation, naming and flows are driven by the agent through MCP. The only run control left in the UI is **Pausar agente**.
+
+MCP responses are compact projections (the interface keeps reading full records). An observation lists only usable elements with short ids, the remaining visible text, and the already known exits of that state. `step`, `goto` and `replay` return the resulting observation, so a separate `navloom_observe` is not needed after them; when nothing changed the elements are not repeated. Short ids and screen names are accepted wherever an id is expected. The full observation and screenshot remain available through `navloom_evidence`.
+
+- `navloom_memory` — the project map: screens, connections with the API calls each action triggers, verified and declared deeplinks, flows, recent runs.
+- `navloom_goto {runId, screen}` — reach a known screen in one call. Navloom plans over confirmed transitions, replays them locally and returns only the arrival. It skips the per-step re-verification, accepts routes learned on an older build (a divergence is reported instead of trusted) and may use a verified deeplink as a shortcut. It is navigation, not proof of a business flow: use `navloom_route` with `scenarioRunId` plus `navloom_replay` for that.
+- `navloom_organize` — name/describe several screens and group flows in one call.
+
+Routes only use dependable transitions: when the same action from the same state has led to different places only the best-evidenced outcome is used; `back` is only used to undo the step right before it; a deeplink stops being a shortcut once it has been seen landing in more than one place (for example when it needs a signed-in session).
+
+### API calls and deeplinks (Android)
+
+Each step records the backend calls it triggered as `method host path status duration`. Query strings, headers and bodies are never stored, and volatile path segments become `{id}`. Calls are kept on the step, merged into the transition (`apis`) and shown on the map connections. Two sources, both without root or certificates:
+
+- `targets.<id>.network.reverse: [{devicePort, upstream}]` — for backends the device reaches through `adb reverse`. While a mission runs, the service puts a loopback recording proxy on that device port and forwards to `upstream`; the mapping is handed back when the mission pauses or finishes. If the service is killed abruptly, run `adb reverse tcp:<devicePort> tcp:<upstreamPort>` again.
+- Log lines of the application process in OkHttp `HttpLoggingInterceptor` format (`--> POST https://…`, `<-- 200 https://… (35ms)`). Disable with `network.logcat: false`.
+
+Web targets record `fetch`/XHR calls from the browser.
+
+Deeplink patterns declared by the app are read from the package resolver table at mission start (`declaredDeeplinks` in memory). A deeplink step is permitted when `deeplink` is an allowed action and the URL matches a configured prefix or a pattern declared by the target package. A deeplink that was opened and observed is stored on the screen it landed on.
+
 Read `navloom_memory`, then `navloom_capabilities`. Configure a target, profile, allowed actions/origins, resets and mission limits. `navloom_start` opens the target and saves the entry observation. `navloom_observe` and `navloom_step` return stable evidence references, interactive candidates and state IDs. `navloom_evidence` returns screenshots as MCP image content or observation JSON.
 
 A focused run calls `navloom_route` with `scenarioRunId` and optional inclusive `startStep`/`endStep`, then `navloom_replay`, using the current version/profile/preconditions. This preserves the exact test segment: different flows can share a receipt or confirmation screen. Destination-only route planning is for navigation/preparation, not proof that a particular business flow ran. Replay stops at divergence; use `navloom_observe` and local recovery rather than re-exploring the whole app. Transitions with coordinate-only actions are not automatically replayed. Deeplinks in a replay are allowed only with `purpose: preparation`.

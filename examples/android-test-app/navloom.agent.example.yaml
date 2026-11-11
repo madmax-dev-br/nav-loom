@@ -15,6 +15,11 @@ targets:
     activity: .MainActivity
     adb: adb
     buildId: android-lab-1.0.0
+    # Record the API calls of each action: the mock is reached through `adb reverse tcp:4791`.
+    network:
+      reverse:
+        - devicePort: 4791
+          upstream: http://127.0.0.1:4791
 profiles:
   default:
     description: Ana Teste, conta demo local; senha indicada pela variável NAVLOOM_LAB_PASSWORD.

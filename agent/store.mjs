@@ -17,7 +17,8 @@ export class Store{
  async save(path,value){await this.atomic(join(this.dir,path),JSON.stringify(value,null,2));}
  async immutable(path,value){const handle=await open(join(this.dir,path),'wx',0o600);try{await handle.writeFile(typeof value==='string'||Buffer.isBuffer(value)?value:JSON.stringify(value,null,2));}finally{await handle.close();}}
  async graph(){return this.json('graph.json',{version:2,flows:[],screens:[],states:[],transitions:[],descriptions:[],legacy:[],extensions:{},presentation:{pinned:{},plugins:{}}});}
- async saveGraph(graph){await this.immutable(`revisions/graph-${uid()}.json`,graph);await this.save('graph.json',graph);}
+ /** A revision is written only when the graph changed; captures of known states do not grow the history. */
+ async saveGraph(graph){const text=JSON.stringify(graph,null,2);if(text===this.lastGraph)return;this.lastGraph??=await readFile(join(this.dir,'graph.json'),'utf8').catch(()=>null);if(text===this.lastGraph)return;await this.immutable(`revisions/graph-${uid()}.json`,text);await this.atomic(join(this.dir,'graph.json'),text);this.lastGraph=text;}
  async runs(){return (await Promise.all((await readdir(join(this.dir,'runs'))).filter(n=>n.endsWith('.json')).map(n=>this.json('runs/'+n)))).sort((a,b)=>b.startedAt.localeCompare(a.startedAt));}
  async run(id){if(!/^[\w-]+$/.test(id))throw Error('Invalid run id');const run=await this.json(`runs/${id}.json`);if(!run)throw Error('Run not found');return run;}
  async saveRun(run){await this.save(`runs/${run.id}.json`,run);}
