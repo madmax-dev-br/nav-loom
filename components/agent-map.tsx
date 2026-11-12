@@ -116,7 +116,7 @@ function measure(root:HTMLElement,routes:Obj[]):Drawing[]{
  return drawn;
 }
 
-function Edges({container,routes,highlighted,onHover,onSelect,onExit,onState}:{container:RefObject<HTMLDivElement|null>;routes:Obj[];highlighted:string|null;onHover:(id:string|null)=>void;onSelect:(id:string)=>void;onExit:(route:Obj)=>void;onState:(screenId:string,stateId:string)=>void}){
+function Edges({container,routes,highlighted,onHover,onSelect,onExit,onState,mark}:{mark?:(route:Obj)=>string;container:RefObject<HTMLDivElement|null>;routes:Obj[];highlighted:string|null;onHover:(id:string|null)=>void;onSelect:(id:string)=>void;onExit:(route:Obj)=>void;onState:(screenId:string,stateId:string)=>void}){
  const [state,setState]=useState<{drawings:Drawing[];width:number;height:number}>({drawings:[],width:0,height:0});
  useEffect(()=>{const root=container.current;if(!root)return;let frame=0;
   const run=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>setState({drawings:measure(root,routes),width:root.scrollWidth,height:root.scrollHeight}));};
@@ -127,7 +127,7 @@ function Edges({container,routes,highlighted,onHover,onSelect,onExit,onState}:{c
  const icon=(type:string,direction?:string)=>type==='scroll'?(direction==='up'?<ChevronsUp size={12}/>:<ChevronsDown size={12}/>):type==='back'?<CornerUpLeft size={11}/>:type==='deeplink'?<Link2 size={11}/>:type==='wait'?<Timer size={11}/>:type==='fill'?<Keyboard size={11}/>:null;
  const paths=(list:Drawing[],top:boolean)=><svg className={'map-edges '+(top?'is-top':'')} width={state.width} height={state.height} aria-hidden="true">
   <defs>{['idle','back','active','exit','state','load'].map(tone=><marker key={tone} id={`map-arrow-${tone}${top?'-top':''}`} viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1.5 1.5L8.5 5L1.5 8.5" className={'map-arrow '+tone}/></marker>)}</defs>
-  {list.map(d=>{const tone=top?'active':d.route.exitFlow?'exit':d.route.block?'state':d.route.load?'load':d.route.direction==='back'?'back':'idle';return <g key={d.id} data-screen-route={d.id} data-direction={d.route.direction}>
+  {list.map(d=>{const tone=top?'active':d.route.exitFlow?'exit':d.route.block?'state':d.route.load?'load':d.route.direction==='back'?'back':'idle';return <g key={d.id} data-screen-route={d.id} data-direction={d.route.direction} className={top?'':mark?.(d.route)??''}>
    <path d={d.path} className={`map-edge ${tone} ${highlighted&&!top?'is-dimmed':''}`} markerEnd={d.arrow?`url(#map-arrow-${tone}${top?'-top':''})`:undefined}/>
    {!top&&!d.route.exitFlow&&!d.route.block&&!d.route.load&&<path d={d.path} className="map-edge-hit" onMouseEnter={()=>onHover(d.route.actionIds[0])} onMouseLeave={()=>onHover(null)} onClick={()=>onSelect(d.route.actionIds[0])}><title>{d.route.actionType==='wait'?'Transição automática':d.route.actionType==='back'?'Voltar':d.route.name}</title></path>}
   </g>;})}
@@ -136,14 +136,14 @@ function Edges({container,routes,highlighted,onHover,onSelect,onExit,onState}:{c
   {paths(state.drawings,false)}
   {paths(state.drawings.filter(active),true)}
   <svg className="map-origins" width={state.width} height={state.height} aria-hidden="true">{state.drawings.filter(d=>d.origin&&(d.route.direction!=='back'||active(d))).map(d=><g key={d.id} className={active(d)?'is-active':highlighted?'is-dimmed':''}><path d={d.origin!.path}/><circle cx={d.origin!.x} cy={d.origin!.y} r="3.5"/></g>)}</svg>
-  <div className="map-labels">{state.drawings.filter(d=>d.route.direction!=='back'||active(d)).flatMap(d=>d.labels.map((label,i)=>{const route=d.route,api=route.apis?.[0],type=route.actionType,actionId=route.actionIds[0],key=d.id+':'+i,at={left:label.x,top:label.y},dimmed=highlighted&&!active(d)?'is-dimmed':'';
+  <div className="map-labels">{state.drawings.filter(d=>d.route.direction!=='back'||active(d)).flatMap(d=>d.labels.map((label,i)=>{const route=d.route,api=route.apis?.[0],type=route.actionType,actionId=route.actionIds[0],key=d.id+':'+i,at={left:label.x,top:label.y},dimmed=(highlighted&&!active(d)?'is-dimmed ':'')+(mark?.(route)??'');
    if(label.kind==='exit')return <button key={key} className={'map-edge-label map-exit-label '+dimmed} style={at} title={`“${route.name}” leva a ${route.toName}, no fluxo ${route.exitFlow.name}`} aria-label={`Ir para o fluxo ${route.exitFlow.name} por ${route.name}`} onClick={()=>onExit(route)}><ArrowUpRight size={12}/><span>{clip(route.exitFlow.name,26)}</span><code>{clip(route.name,30)} → {clip(route.toName,18)}</code></button>;
    if(label.kind==='load')return <div key={key} className={'map-load-block '+dimmed} style={{...at,width:LOAD_WIDTH}} title={`Ao entrar em ${route.toName}, o app chama:\n${route.apis.map(apiText).join('\n')}`}><small>ao entrar</small>{route.apis.map((a:Obj)=><code key={apiText(a)}>{clip(apiText(a),24)}</code>)}</div>;
    if(label.kind==='status')return <span key={key} className={'map-status '+dimmed} style={at} title={`Resposta ${route.statusText} leva a ${route.toName}`}>{route.statusText}</span>;
    if(label.kind==='state'){const target=label.data!;return <button key={key} data-action-id={target.actionIds[0]} className={'map-state-chip '+(highlighted&&target.actionIds.includes(highlighted)?'is-active':dimmed)} style={at} title={`“${route.name}” deixa a tela no estado “${target.name}”${target.statusText?` (resposta ${target.statusText})`:''}. Clique para ver esse estado.`} aria-label={`Ver o estado ${target.name}`}
     onMouseEnter={()=>onHover(target.actionIds[0])} onMouseLeave={()=>onHover(null)} onClick={()=>onState(route.fromScreen,target.id)}>{route.actionType==='scroll'?(route.scrollDirection==='up'?<ChevronsUp size={11}/>:<ChevronsDown size={11}/>):<RefreshCw size={10}/>}{target.statusText&&<b>{target.statusText}</b>}<span>{clip(target.name,18)}</span></button>;}
    const name=type==='wait'?'Automático':type==='back'?'Voltar':type==='scroll'?(route.scrollDirection==='up'?'Rolar para cima':'Rolar para baixo'):route.name,block=label.kind==='block';
-   return <button key={key} data-action-id={actionId} data-side={label.side} className={`map-edge-label ${block?'is-block':''} ${active(d)?'is-active':dimmed}`} style={block?{...at,width:BLOCK_WIDTH}:at} title={[route.name,...(route.apis??[]).map(apiText)].join('\n')}
+   return <button key={key} data-action-id={actionId} data-side={label.side} className={`map-edge-label ${block?'is-block':''} ${active(d)?'is-active '+(mark?.(route)??''):dimmed}`} style={block?{...at,width:BLOCK_WIDTH}:at} title={[route.name,...(route.apis??[]).map(apiText)].join('\n')}
     onMouseEnter={()=>onHover(actionId)} onMouseLeave={()=>onHover(null)} onFocus={()=>onHover(actionId)} onBlur={()=>onHover(null)} onClick={()=>onSelect(actionId)}>
     {icon(type,route.scrollDirection)}<span>{clip(name,block?24:30)}</span>
     {api&&<code>{clip(apiText(api),block?26:32)}{route.apis.length>1?` +${route.apis.length-1}`:''}</code>}
@@ -166,7 +166,7 @@ export function displayStates(ids:string[],observations:Obj[],graph:Obj,chosen:R
  return map;
 }
 
-export function AgentMap({graph,run,observations,screens,projectId,resetKey,visibleKinds,showReturns,selectedScreen,selectedEdge,onSelectScreen,onSelectEdge,flowId,onExitFlow,chosenStates:chosen,onChooseState,focus}:{chosenStates:Record<string,string>;onChooseState:(screenId:string,stateId:string)=>void;focus?:{screenId:string;identity:string}|null;graph:Obj;run?:Obj;flowId?:string;onExitFlow?:(exit:{flow:Obj;via:string;toScreen:string;toName:string;fromName:string})=>void;observations:Obj[];screens:Obj[];projectId:string;resetKey:string;visibleKinds:string[];showReturns:boolean;selectedScreen:string;selectedEdge:string|null;onSelectScreen:(id:string)=>void;onSelectEdge:(id:string|null)=>void}){
+export function AgentMap({marks,graph,run,observations,screens,projectId,resetKey,visibleKinds,showReturns,selectedScreen,selectedEdge,onSelectScreen,onSelectEdge,flowId,onExitFlow,chosenStates:chosen,onChooseState,focus}:{marks?:{screen:(id:string)=>string;route:(route:Obj)=>string};chosenStates:Record<string,string>;onChooseState:(screenId:string,stateId:string)=>void;focus?:{screenId:string;identity:string}|null;graph:Obj;run?:Obj;flowId?:string;onExitFlow?:(exit:{flow:Obj;via:string;toScreen:string;toName:string;fromName:string})=>void;observations:Obj[];screens:Obj[];projectId:string;resetKey:string;visibleKinds:string[];showReturns:boolean;selectedScreen:string;selectedEdge:string|null;onSelectScreen:(id:string)=>void;onSelectEdge:(id:string|null)=>void}){
  const container=useRef<HTMLDivElement>(null),[hovered,setHovered]=useState<string|null>(null);
  const highlighted=selectedEdge??hovered;
  const idKey=screens.map(s=>s.id).join(),ids=useMemo(()=>idKey.split(',').filter(Boolean),[idKey]);
@@ -225,12 +225,12 @@ export function AgentMap({graph,run,observations,screens,projectId,resetKey,visi
  const active=routes.find((r:Obj)=>highlighted&&!r.exitFlow&&!r.load&&r.actionIds.includes(highlighted));
  const byId=new Map(screens.map(s=>[s.id,s]));
  return <AgentCanvas container={container} resetKey={resetKey}>
-  <Edges container={container} routes={routes} highlighted={highlighted} onHover={setHovered} onState={(screenId,stateId)=>{onChooseState(screenId,stateId);onSelectEdge(null);}} onSelect={id=>{onSelectEdge(id);const route=routes.find((r:Obj)=>!r.exitFlow&&r.actionIds.includes(id));if(route)onSelectScreen(route.toScreen);}} onExit={route=>onExitFlow?.({flow:route.exitFlow,via:route.name,toScreen:route.toScreen,toName:route.toName,fromName:route.fromName})}/>
+  <Edges mark={marks?.route} container={container} routes={routes} highlighted={highlighted} onHover={setHovered} onState={(screenId,stateId)=>{onChooseState(screenId,stateId);onSelectEdge(null);}} onSelect={id=>{onSelectEdge(id);const route=routes.find((r:Obj)=>!r.exitFlow&&r.actionIds.includes(id));if(route)onSelectScreen(route.toScreen);}} onExit={route=>onExitFlow?.({flow:route.exitFlow,via:route.name,toScreen:route.toScreen,toName:route.toName,fromName:route.fromName})}/>
   {columns.map((column,depth)=><div className="map-column" key={depth}>{column.map(id=>{
    const s=byId.get(id)!,{states,current}=display.get(id)??{states:[],current:undefined},o=current?.capture,portrait=(o?.viewport?.height??0)>(o?.viewport?.width??1);
    const own=screenApis(graph,id),apis=new Set<string>([...own.load,...own.action].map(apiText));
    const dim=!!active&&active.fromScreen!==id&&active.toScreen!==id;
-   return <article key={id} data-graph-screen={id} className={`map-card ${portrait?'is-portrait':''} ${selectedScreen===id?'selected':''} ${dim?'is-dim':''}`}>
+   return <article key={id} data-graph-screen={id} className={`map-card ${portrait?'is-portrait':''} ${selectedScreen===id?'selected':''} ${dim?'is-dim':''} ${marks?.screen(id)??''}`}>
     <header className="map-card-head"><button className="map-card-title" onClick={()=>{onSelectEdge(null);onSelectScreen(id);}}><span>{index.get(id)}</span><strong>{s.name}</strong></button>
      {states.length>1?<select className="map-state-select" aria-label={`Estado exibido de ${s.name}`} title="Estado exibido desta tela" value={current?.id} onChange={event=>{onChooseState(id,event.target.value);onSelectEdge(null);}}>{states.map(state=><option key={state.id} value={state.id}>{state.label}</option>)}</select>:states.length===1&&states[0].name!=='estado'&&<span className="map-state-only" title="Único estado capturado">{clip(states[0].label,14)}</span>}</header>
     {o?<div className="map-shot"><div className="agent-image" data-capture={o.id} data-state-id={o.stateId}>

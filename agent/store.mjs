@@ -15,7 +15,7 @@ function upgrade(graph){
 }
 export class Store{
  constructor(root){this.root=resolve(root);this.dir=join(this.root,'.navloom');this.graphFallback=null;}
- async init(){for(const path of ['runs','evidence','revisions','plugins','skills'])await mkdir(join(this.dir,path),{recursive:true});}
+ async init(){for(const path of ['runs','evidence','revisions','plugins','skills','drafts'])await mkdir(join(this.dir,path),{recursive:true});}
  async config(){return configSchema.parse(parse(await readFile(join(this.root,'navloom.yaml'),'utf8')));}
  async saveConfig(value){const config=configSchema.parse(value);let old;try{old=await readFile(join(this.root,'navloom.yaml'),'utf8');}catch(e){if(e.code!=='ENOENT')throw e;}if(old){const parsed=parse(old);if(parsed?.kind!=='navloom-agent-project')throw Error('Existing navloom.yaml is legacy. Import it and choose a separate agent-project folder; it will not be overwritten.');await this.immutable(`revisions/config-${uid()}.yaml`,old);}await this.atomic(join(this.root,'navloom.yaml'),stringify(config));return config;}
  async atomic(file,text){const temp=file+'.'+uid()+'.tmp';await writeFile(temp,text,{mode:0o600});await rename(temp,file);}
@@ -23,9 +23,12 @@ export class Store{
  async save(path,value){await this.atomic(join(this.dir,path),JSON.stringify(value,null,2));}
  async immutable(path,value){const handle=await open(join(this.dir,path),'wx',0o600);try{await handle.writeFile(typeof value==='string'||Buffer.isBuffer(value)?value:JSON.stringify(value,null,2));}finally{await handle.close();}}
  /** Local graph first; otherwise the committed text map, so a fresh checkout renders the known application. */
- async graph(){const local=await this.json('graph.json',null);if(local)return upgrade({...emptyGraph(),...local});if(this.graphFallback){const imported=await this.graphFallback().catch(()=>null);if(imported)return {...emptyGraph(),...imported};}return emptyGraph();}
+ /** While a mission works on a draft, everything that reads or writes "the graph" sees that draft; the recorded map is untouched. */
+ async graph(){const draft=this.draftId?.();if(draft){const working=await this.json(`drafts/${draft}.json`,null);if(working)return upgrade({...emptyGraph(),...working});}return this.recorded();}
+ async saveGraph(graph){const draft=this.draftId?.();if(draft)return this.atomic(join(this.dir,`drafts/${draft}.json`),JSON.stringify(graph));return this.saveRecorded(graph);}
+ async recorded(){const local=await this.json('graph.json',null);if(local)return upgrade({...emptyGraph(),...local});if(this.graphFallback){const imported=await this.graphFallback().catch(()=>null);if(imported)return {...emptyGraph(),...imported};}return emptyGraph();}
  /** A revision is written only when the graph changed; captures of known states do not grow the history. */
- async saveGraph(graph){const text=JSON.stringify(graph,null,2);if(text===this.lastGraph)return;this.lastGraph??=await readFile(join(this.dir,'graph.json'),'utf8').catch(()=>null);if(text===this.lastGraph)return;await this.immutable(`revisions/graph-${uid()}.json`,text);await this.atomic(join(this.dir,'graph.json'),text);this.lastGraph=text;}
+ async saveRecorded(graph){const text=JSON.stringify(graph,null,2);if(text===this.lastGraph)return;this.lastGraph??=await readFile(join(this.dir,'graph.json'),'utf8').catch(()=>null);if(text===this.lastGraph)return;await this.immutable(`revisions/graph-${uid()}.json`,text);await this.atomic(join(this.dir,'graph.json'),text);this.lastGraph=text;}
  async runs(){return (await Promise.all((await readdir(join(this.dir,'runs'))).filter(n=>n.endsWith('.json')).map(n=>this.json('runs/'+n)))).sort((a,b)=>b.startedAt.localeCompare(a.startedAt));}
  async run(id){if(!/^[\w-]+$/.test(id))throw Error('Invalid run id');const run=await this.json(`runs/${id}.json`);if(!run)throw Error('Run not found');return run;}
  async saveRun(run){await this.save(`runs/${run.id}.json`,run);}

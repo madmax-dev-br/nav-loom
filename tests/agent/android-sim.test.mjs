@@ -49,7 +49,7 @@ class SimDevice{
   if(cmd.startsWith('shell sha256sum'))return 'deadbeef  /data/app/base.apk\n';
   throw Error('Unexpected adb command: '+cmd);}
 }
-const config={version:2,kind:'navloom-agent-project',id:'sim',name:'Simulated Android app',targets:{android:{platform:'android',serial:'emulator-5554',package:PKG,activity:'.MainActivity',adb:'adb'}},permissions:{actions:['open','click','fill','scroll','back','wait','deeplink'],deeplinkPrefixes:['navloomsim://app/'],pluginCapabilities:[]}};
+const config={version:2,kind:'navloom-agent-project',review:'auto',id:'sim',name:'Simulated Android app',targets:{android:{platform:'android',serial:'emulator-5554',package:PKG,activity:'.MainActivity',adb:'adb'}},permissions:{actions:['open','click','fill','scroll','back','wait','deeplink'],deeplinkPrefixes:['navloomsim://app/'],pluginCapabilities:[]}};
 test('simulated Android device: deterministic exploration with the real executor, logcat API calls, back recovery, deeplinks and map export',async t=>{
  const device=new SimDevice();const root=await mkdtemp(join(tmpdir(),'navloom-android-sim-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const r=await new Runtime(root,{executorFactory:target=>new AndroidExecutor(target,{runCommand:(file,args)=>device.adb(file,args)})}).init();await r.configure(config);

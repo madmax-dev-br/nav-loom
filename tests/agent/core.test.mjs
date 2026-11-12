@@ -8,7 +8,7 @@ import {Store,hash} from '../../agent/store.mjs';
 import {planRoute,compareRuns} from '../../agent/graph.mjs';
 import {AndroidExecutor,parseHierarchy} from '../../agent/executors/android.mjs';
 import {Plugins} from '../../agent/plugins.mjs';
-export const config={version:2,kind:'navloom-agent-project',id:'test',name:'Test app',targets:{web:{platform:'web',url:'http://127.0.0.1:4790',origins:['http://127.0.0.1:4790']}},permissions:{actions:['open','click','fill','scroll','back','wait','deeplink'],deeplinkPrefixes:['http://127.0.0.1:4790/'],pluginCapabilities:['read_graph','deeplink'],pluginImages:[]}};
+export const config={version:2,kind:'navloom-agent-project',review:'auto',id:'test',name:'Test app',targets:{web:{platform:'web',url:'http://127.0.0.1:4790',origins:['http://127.0.0.1:4790']}},permissions:{actions:['open','click','fill','scroll','back','wait','deeplink'],deeplinkPrefixes:['http://127.0.0.1:4790/'],pluginCapabilities:['read_graph','deeplink'],pluginImages:[]}};
 class Fake{
  constructor(){this.state='home';this.logs=[];}
  async capabilities(){return {available:['capture','interact','hierarchy','logs'],missing:[]};}async start(){this.state='home';}async build(){return {version:'1'};}async capture(){return Buffer.from('png');}async observe(){return {route:'/',screenKey:this.state,stateKey:'ready',title:this.state,heading:this.state,text:this.state,elements:[{id:'next',identity:'next',name:'Next',actions:['click'],bounds:{x:.1,y:.1,width:.2,height:.1}}],viewport:{width:400,height:800},scroll:{y:0}};}async act(a){if(a.type==='click')this.state='receipt';}async diagnostics(){return {availability:'available',logs:this.logs};}async close(){}

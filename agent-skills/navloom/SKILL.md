@@ -101,30 +101,30 @@ No cliente MCP (Cursor, Claude Code, etc.):
 {"mcpServers":{"navloom":{"command":"node","args":["/caminho/Navloom/scripts/agent-mcp.mjs","/caminho/absoluto/do/projeto"]}}}
 ```
 
-Por padrão o MCP expõe só o núcleo de ferramentas (26), porque cada definição vai para o modelo em todo turno. `--tools=extended` adiciona sondagem unitária, reset, `annotate`/`group_flow` avulsos, comparação, código e vínculos; `--tools=all` inclui configuração e plugins (ou a variável `NAVLOOM_MCP_TOOLS`). A configuração do projeto é feita pela interface ou editando `navloom.yaml`.
+Por padrão o MCP expõe só o núcleo de ferramentas (21), porque cada definição vai para o modelo em todo turno. `--tools=extended` adiciona `capabilities`, `deeplinks`, `describe`, `route`/`replay`, sondagem unitária, reset, `annotate`/`group_flow` avulsos, comparação, código e vínculos; `--tools=all` inclui configuração e plugins (ou a variável `NAVLOOM_MCP_TOOLS`). A configuração do projeto é feita pela interface ou editando `navloom.yaml`.
 
 O serviço tem que estar rodando antes da conexão. Uma missão por projeto por vez. Se a conexão cair, a missão é pausada e pode ser retomada com `navloom_resume`.
 
 Sequência mínima de uma sessão:
 
 1. `navloom_memory`: o que já se sabe (telas, estados, transições, endpoints, deeplinks, harness, execuções anteriores). Não reexplore o que já está mapeado.
-2. `navloom_capabilities` com o alvo: confirma dispositivo, app instalado, hierarquia e rede.
-3. `navloom_start` com `target`, `mode` (`exploratory` ou `focused`), `objective` e `assertions` opcionais. Abre o app e captura a entrada.
-4. Loop de exploração (seção 5). Para chegar a uma tela já conhecida use `navloom_goto` (uma chamada, mesmo sem missão aberta) em vez de repetir passos.
-5. `navloom_organize` uma vez: nomeia e descreve as telas e agrupa os fluxos (telas na ordem da primeira visita). `navloom_describe` por transição/estado, em linguagem de negócio.
-6. `navloom_finish`: avalia asserções, coleta diagnóstico e cobertura. Sem asserções o resultado é `not_verified`, nunca "passou".
+2. `navloom_start` com `target`, `mode` (`record`, `validate` ou `walk`), `objective` e `assertions` opcionais. Abre o app e captura a entrada; se faltar dispositivo, app, hierarquia ou rede, volta `blocked` com o que falta.
+3. Loop de exploração (seção 5). Para chegar a uma tela já conhecida use `navloom_goto` (uma chamada, mesmo sem missão aberta) em vez de repetir passos.
+4. `navloom_organize` uma vez: nomeia e descreve as telas e agrupa os fluxos (telas na ordem da primeira visita).
+5. `navloom_finish`: avalia asserções, coleta diagnóstico e cobertura. Sem asserções o resultado é `not_verified`, nunca "passou".
 
 ## 5. Explorar de forma determinística
 
-Cada passo (`navloom_step`, `navloom_goto`, `navloom_replay`) já devolve a tela resultante; não chame `navloom_observe` depois deles. A visão compacta traz: tela e estado (ids curtos, aceitos de volta em qualquer chamada), elementos acionáveis (`id`, `label`, `do`), texto visível, `known` (saídas já mapeadas deste estado), `api` (chamadas que a ação disparou) e, quando a tela precisa de algo de uma pessoa, `needs` e `remembered` (seção 6).
+Cada passo (`navloom_step`, `navloom_goto`, `navloom_replay`) já devolve a tela resultante; não chame `navloom_observe` depois deles. A visão compacta traz: tela e estado (ids curtos, aceitos de volta em qualquer chamada), elementos acionáveis, um por linha (`id rótulo`; clique é o padrão, outra ação vem entre parênteses antes do rótulo, como `(fill)` ou `(fill, secret)`), texto visível, `known` (saídas já mapeadas deste estado, `controle → tela`), `api` (chamadas que a ação disparou) e, quando a tela precisa de algo de uma pessoa, `needs` e `remembered` (seção 6).
 
 - `navloom_explore` com `maxCandidates` percorre os candidatos clicáveis pendentes em ordem estável (de cima para baixo, da esquerda para a direita), classifica cada efeito (`navigation`, `state`, `scroll`, `none`), registra diff de texto/elementos, região de pixels alterada, chamadas de API e um resumo. Volta com `back` só de telas novas; de telas já visitadas antes da origem não volta. Alcança outros estados apenas por rotas confirmadas; divergências viram evidência nova. Para em `max_candidates`, `frontier_exhausted`, `no_reachable_candidates`, orçamento ou bloqueio. Campos de preenchimento, campos sensíveis e rótulos em `exploration.avoid` ficam para você.
 - `navloom_probe` sonda um único candidato (`candidateKey` da frontier ou `elementId`) com a mesma classificação.
 - `navloom_step` executa uma ação explícita: `click`, `fill` (com `value` ou `secretRef`), `scroll`, `back`, `wait`, `deeplink`, `open`. Sempre use o `elementId` da observação atual; se a tela mudou, observe de novo. Coordenadas (`point`) só como último recurso, com o `observationId` atual.
 - Formulários: preencha com `fill`, submeta com `click`, e descreva o que aconteceu. Nunca invente valores de negócio (CPF, cartão, chaves); peça (seção 6).
 - `navloom_frontier` mostra o que ainda não foi visitado. Frontier vazia significa cobertura dos candidatos descobertos, não do app inteiro.
+- Modos de missão (`mode` em `navloom_start`): `record` (gravação: mapear o que é novo), `validate` (validação: percorrer o que está gravado; telas, destinos e APIs diferentes são apontados) e `walk` (caminhada: só navegar, nada é gravado nem comparado). Em gravação e validação o que você encontra fica num rascunho: o mapa gravado só muda quando a pessoa aprova em Execuções. Quando `navloom_finish` devolver `review: pending`, avise o usuário e liste as `changes`; você não aprova por ele. `review: unchanged` significa que tudo bateu com o gravado.
 - `navloom_goto {screen}` leva a uma tela conhecida (nome ou id) sem raciocínio seu: o Navloom segue o grafo de decisão aprendido (observa, consulta a próxima ação, age), refaz o que foi digitado em formulários, sai de desvios com voltar/reinício e usa deeplinks verificados como atalho. Não precisa de missão aberta: sem `runId` ele usa a ativa ou abre uma e devolve o `runId` (encerre com `navloom_finish`). Se voltar `stuck`, continue da tela devolvida com `navloom_step`; esses passos entram no grafo e o próximo `goto` vai mais longe sozinho. `plan: true` só lista as decisões. É navegação; não prova um fluxo de negócio.
-- Rotas: `navloom_route` planeja um caminho confirmado até um estado; `navloom_replay` o executa e para na primeira divergência. Para repetir um cenário exato use `scenarioRunId` com `startStep`/`endStep`.
+- Rotas (nível estendido): `navloom_route` planeja um caminho confirmado até um estado; `navloom_replay` o executa e para na primeira divergência. Para repetir um cenário exato use `scenarioRunId` com `startStep`/`endStep`.
 - Android: `back` numa tela raiz fecha o app; o Navloom relança e reporta falha recuperável, a missão continua. Entrada de texto por ADB só aceita ASCII.
 
 ## 5a. Economia de tokens: trabalhe com o grafo textual, não com imagens
@@ -163,13 +163,13 @@ Quando você notar um padrão estável que o Navloom não reconhece sozinho, reg
 ## 7. Chamadas de API, deeplinks e código
 
 - Chamadas de API ficam em cada transição (`apis`: método, host, caminho com `{id}` no lugar de identificadores, status vistos e contagem) e agregadas por endpoint em `navloom_status`/`navloom_memory`, com telas e transições de origem. Um `GET` numa transição que muda de tela é o carregamento da tela de destino; o resto é da ação. Web: chamadas `fetch`/XHR do navegador. Android: um proxy de gravação para backends alcançados por `adb reverse` (`network.reverse` no alvo) e linhas do logcat do processo do app (OkHttp, formatos ensinados por scripts `logcat`, e linhas comuns como `GET /caminho -> 200`). Quando a chamada passa pelo proxy ou pelo navegador, a troca completa (cabeçalhos e corpos, com senhas, tokens e cookies mascarados) fica num arquivo de evidência apontado pelo passo; `network.bodies: false` desliga isso. São evidência do que o app pediu, não prova do servidor.
-- `navloom_deeplinks`: deeplinks declarados (intent filters do pacote no Android), links observados (Web), prefixos permitidos e deeplinks verificados. Verifique os relevantes com `navloom_step` `deeplink`; a tela de destino é registrada automaticamente. Um deeplink só serve para preparar um teste, nunca para pular um passo do trecho testado.
+- `navloom_deeplinks` (nível estendido; `navloom_memory`, `navloom_start` e `navloom_screen` já listam os deeplinks): deeplinks declarados (intent filters do pacote no Android), links observados (Web), prefixos permitidos e deeplinks verificados. Verifique os relevantes com `navloom_step` `deeplink`; a tela de destino é registrada automaticamente. Um deeplink só serve para preparar um teste, nunca para pular um passo do trecho testado.
 - Código: com `repositories` configurados, `navloom_link_suggestions` de uma tela devolve candidatos de frontend (por marcadores `navloom:screen`, resource ids/testTags, rota e rótulos) e de backend (pelos caminhos dos endpoints que a tela dispara). Leia os arquivos com `navloom_source` ou `navloom_search_source`, oriente-se com `navloom_source_tree`, e confirme com `navloom_link` (`kind` `screen` ou `endpoint`, `role` frontend/backend, `status` `confirmed` só depois de ler o código). Vínculos inferidos são hipóteses.
 
 ## 8. Descrever e organizar
 
 - `navloom_organize` nomeia e descreve várias telas e agrupa os fluxos em uma chamada. Em cada descrição: finalidade para o cliente, informações mostradas, ações de negócio disponíveis e regras evidenciadas. Não narre cliques, resultados de teste nem problemas do executor. O nome inicial de uma tela vem do próprio app (fragment, depois o cabeçalho).
-- `navloom_describe` por transição (o que a interação faz para o usuário), estado (o que o estado significa) e fluxo. O resumo determinístico fica separado da sua descrição.
+- `navloom_describe` (nível estendido) por transição (o que a interação faz para o usuário), estado (o que o estado significa) e fluxo. O resumo determinístico fica separado da sua descrição.
 - Marcações opcionais no app melhoram a identidade das telas: Web `data-navloom-screen`/`data-navloom-state`; Compose `contentDescription = "navloom:screen:<id>:state:<estado>"` com `testTagsAsResourceId = true`. Sem isso a identidade é estrutural e telas parecidas podem se confundir.
 
 ## 9. O que versionar

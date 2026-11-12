@@ -12,7 +12,7 @@ import {parseDumpsysDeeplinks} from '../../agent/deeplinks.mjs';
 import {importMap} from '../../agent/map.mjs';
 import {IosExecutor} from '../../agent/executors/ios.mjs';
 import {AndroidExecutor} from '../../agent/executors/android.mjs';
-const config={version:2,kind:'navloom-agent-project',id:'test',name:'Mapped app',targets:{web:{platform:'web',url:'http://127.0.0.1:4790',origins:['http://127.0.0.1:4790']}},permissions:{actions:['open','click','fill','scroll','back','wait','deeplink'],deeplinkPrefixes:['http://127.0.0.1:4790/'],pluginCapabilities:[]}};
+const config={version:2,kind:'navloom-agent-project',review:'auto',id:'test',name:'Mapped app',targets:{web:{platform:'web',url:'http://127.0.0.1:4790',origins:['http://127.0.0.1:4790']}},permissions:{actions:['open','click','fill','scroll','back','wait','deeplink'],deeplinkPrefixes:['http://127.0.0.1:4790/'],pluginCapabilities:[]}};
 function image(width,height,paint){const pixels=new Uint8Array(width*height*4).fill(255);for(let y=0;y<height;y++)for(let x=0;x<width;x++){const c=paint(x,y);if(c){const o=(y*width+x)*4;pixels[o]=c[0];pixels[o+1]=c[1];pixels[o+2]=c[2];}}return encodePng({width,height,pixels});}
 /** Multi-screen fake: home has three buttons; "Details" navigates, "Toggle" changes state, "Noop" does nothing; back returns. */
 class App{

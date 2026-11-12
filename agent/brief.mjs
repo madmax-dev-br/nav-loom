@@ -16,11 +16,12 @@ export function briefObservation(o,graph,previous){
  // Repeated labels (list rows) are told apart by their test tag.
  const seen=new Map();for(const e of elements){const label=e.label||e.name;seen.set(label,(seen.get(label)??0)+1);}
  const tag=e=>e.resourceId?.split(/[:/]/).at(-1);
- out.elements=elements.slice(0,60).map(e=>{const label=e.label||e.name;return {id:short(e.id),label:clip(seen.get(label)>1&&tag(e)&&!label.startsWith(tag(e))?`${label} (${tag(e)})`:label,60),do:e.actions.join('/'),...(e.sensitive?{secret:true}:{})};});
+ // One line per element, "id label": click is implied, anything else comes first in parentheses. Half the size of an object per element.
+ out.elements=elements.slice(0,60).map(e=>{const label=e.label||e.name,does=[...(e.actions.join('/')==='click'?[]:[e.actions.join('/')]),...(e.sensitive?['secret']:[])];return `${short(e.id)} ${does.length?`(${does.join(', ')}) `:''}${clip(seen.get(label)>1&&tag(e)&&!label.startsWith(tag(e))?`${label} (${tag(e)})`:label,60)}`;});
  if(elements.length>60)out.moreElements=elements.length-60;
  const labels=new Set(elements.flatMap(e=>[e.name,e.label,e.text]));
- const text=clip(String(o.text??'').split('\n').filter(line=>line.trim()&&!labels.has(line)).join(' | '),700);if(text)out.text=text;
- const known=new Map();for(const t of graph.transitions)if(t.confirmed&&t.from===o.stateId&&t.to!==o.stateId){const to=screenOf(graph,t.to);known.set(t.name+'>'+to?.id,{via:clip(t.name,40),to:to?.name});}
+ const text=clip([...new Set(String(o.text??'').split('\n').map(line=>line.trim()).filter(line=>line&&!labels.has(line)))].join(' | '),700);if(text)out.text=text;
+ const known=new Map();for(const t of graph.transitions)if(t.confirmed&&t.from===o.stateId&&t.to!==o.stateId){const to=screenOf(graph,t.to);known.set(t.name+'>'+to?.id,`${clip(t.name,40)} → ${to?.name}`);}
  if(known.size)out.known=[...known.values()].slice(0,20);
  // What this screen needs from a person, and what earlier answers already cover.
  const needs=(o.help?.needs??[]).map(n=>({element:short(n.elementId),name:clip(n.name,40),...(n.secretRef?{secretRef:n.secretRef}:{ask:'navloom_ask kind=credential'})}));if(needs.length)out.needs=needs;
@@ -53,7 +54,7 @@ export async function briefMove(result,store){
 export function briefRun(run,graph){
  const byId=new Map(run.observations.map(o=>[o.id,o])),name=id=>graph.screens.find(s=>s.id===byId.get(id)?.screenId)?.name;
  const errors=(run.diagnostics?.logs??[]).filter(l=>l.level==='error').slice(-8).map(l=>clip(l.message,200));
- return {runId:run.id,objective:run.objective,mode:run.mode,status:run.status,...(run.stopReason?{stopReason:run.stopReason}:{}),...(run.result?{result:run.result}:{}),...(run.checks?.length?{checks:run.checks.map(c=>`${c.assertion.type}${c.assertion.value?' '+clip(c.assertion.value,40):''}: ${c.result}`)}:{}),metrics:run.metrics,...(run.coverage?{coverage:run.coverage}:{}),
+ return {runId:run.id,objective:run.objective,mode:run.mode,status:run.status,...(run.review?{review:run.review.status,...(run.review.status==='pending'?{reviewNote:'Waiting for a person to approve in the interface (Execuções); the recorded map is unchanged until then.'}:{}),...(run.changes?.items.length?{changes:run.changes.items.slice(0,20).map(i=>`${i.type}: ${i.text}`)}:{})}:{}),...(run.stopReason?{stopReason:run.stopReason}:{}),...(run.result?{result:run.result}:{}),...(run.checks?.length?{checks:run.checks.map(c=>`${c.assertion.type}${c.assertion.value?' '+clip(c.assertion.value,40):''}: ${c.result}`)}:{}),metrics:run.metrics,...(run.coverage?{coverage:run.coverage}:{}),
   steps:run.steps.slice(-80).map((s,i)=>clip(`${Math.max(0,run.steps.length-80)+i} ${s.action.type}${s.transitionId?` "${clip(graph.transitions.find(t=>t.id===s.transitionId)?.name,30)}"`:''} ${name(s.before)??'?'} → ${name(s.after)??'?'}${s.network?.length?' ['+s.network.map(apiLabel).join(', ')+']':''}${s.status==='completed'?'':' '+s.status}${s.error?': '+s.error:''}`,260)),...(errors.length?{errors}:{})};
 }
 

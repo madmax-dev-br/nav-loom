@@ -8,7 +8,7 @@ import {briefMove} from '../../agent/brief.mjs';
 import {operations} from '../../agent/operations.mjs';
 import {CallLog} from '../../agent/network.mjs';
 
-const config={version:2,kind:'navloom-agent-project',id:'nav',name:'Nav app',targets:{app:{platform:'web',url:'http://127.0.0.1:4790',origins:['http://127.0.0.1:4790']}},permissions:{actions:['open','click','fill','scroll','back','wait','deeplink'],deeplinkPrefixes:['app://'],pluginCapabilities:['read_graph'],pluginImages:[]}};
+const config={version:2,kind:'navloom-agent-project',review:'auto',id:'nav',name:'Nav app',targets:{app:{platform:'web',url:'http://127.0.0.1:4790',origins:['http://127.0.0.1:4790']}},permissions:{actions:['open','click','fill','scroll','back','wait','deeplink'],deeplinkPrefixes:['app://'],pluginCapabilities:['read_graph'],pluginImages:[]}};
 const CONTROLS={home:['list','account'],list:['item','home_tab'],detail:['buy','home_tab'],promo:['later'],login:['email','enter'],account:['logout','orders'],error:['retry'],receipt:['done'],maintenance:['continue'],orders:['order','home_tab']};
 const BACK={promo:'home',list:'home',detail:'list',login:'home',account:'home',orders:'home'};
 const elementId=name=>Buffer.from(name.padEnd(8,'_')).toString('hex').slice(0,16);
@@ -33,41 +33,41 @@ async function learn(r){const run=await r.start({target:'app',mode:'exploratory'
  await click(r,run,'account');await r.step(run.id,{type:'fill',elementId:elementId('email'),value:'ana@test.dev'});await click(r,run,'enter');return r.finish(run.id);}
 
 test('goto opens the app by itself and reaches a learned screen without one agent call',async t=>{const world={},r=await setup(t,world);await learn(r);
- const plan=await r.goto({target:'app',screen:'Detail',plan:true});assert.equal(plan.status,'planned');assert.deepEqual(plan.decisions.map(d=>[d.from,d.do,d.to]),[['List','click item','Detail'],['Home','click list','List']]);assert.equal(world.launches,1,'a plan touches no device');
- const moved=await r.goto({target:'app',screen:'Detail'});assert.equal(moved.status,'arrived');assert.equal(moved.started,true);assert.equal(moved.steps,2);assert.equal(moved.recoveries,0);assert.equal(moved.observation.screenKey,'detail');
+ const plan=await r.goto({mode:'record',target:'app',screen:'Detail',plan:true});assert.equal(plan.status,'planned');assert.deepEqual(plan.decisions.map(d=>[d.from,d.do,d.to]),[['List','click item','Detail'],['Home','click list','List']]);assert.equal(world.launches,1,'a plan touches no device');
+ const moved=await r.goto({mode:'record',target:'app',screen:'Detail'});assert.equal(moved.status,'arrived');assert.equal(moved.started,true);assert.equal(moved.steps,2);assert.equal(moved.recoveries,0);assert.equal(moved.observation.screenKey,'detail');
  const brief=await briefMove(moved,r.store);assert.equal(brief.runId,moved.runId);assert.equal(brief.status,'arrived');
  const run=await r.finish(moved.runId);assert.equal(run.metrics.agentCalls,0);assert.equal(run.metrics.replayedSteps,2);assert.match(run.objective,/Detail/);
  const memo=(await r.store.graph()).routes[(await r.store.graph()).screens.find(s=>s.name==='Detail').id];assert.equal(memo.runs,1);assert.equal(memo.arrived,1);assert.equal(memo.bestSteps,2);assert.equal(memo.lastStatus,'arrived');await r.close();});
 
 test('a screen whose content changed is still recognised and its known control used',async t=>{const world={},r=await setup(t,world);await learn(r);world.banner=true;
- const moved=await r.goto({target:'app',screen:'Detail'});assert.equal(moved.status,'arrived');assert.equal(moved.steps,2);
+ const moved=await r.goto({mode:'record',target:'app',screen:'Detail'});assert.equal(moved.status,'arrived');assert.equal(moved.steps,2);
  const graph=await r.store.graph(),home=graph.screens.find(s=>s.name==='Home');assert.equal(graph.states.filter(s=>s.screenId===home.id).length,2,'the changed home is a new state of the same screen');
  // The new state is now known in its own right: the second time it is an exact decision.
- await r.finish(moved.runId);const again=await r.goto({target:'app',screen:'Detail'});assert.equal(again.status,'arrived');assert.ok(again.results.every(x=>x.status==='completed'));await r.close();});
+ await r.finish(moved.runId);const again=await r.goto({mode:'record',target:'app',screen:'Detail'});assert.equal(again.status,'arrived');assert.ok(again.results.every(x=>x.status==='completed'));await r.close();});
 
 test('a detour through a screen never seen is left with back and the walk continues',async t=>{const world={},r=await setup(t,world);await learn(r);world.promo=1;
- const moved=await r.goto({target:'app',screen:'Detail'});assert.equal(moved.status,'arrived');assert.equal(moved.recoveries,1);assert.equal(moved.observation.screenKey,'detail');
+ const moved=await r.goto({mode:'record',target:'app',screen:'Detail'});assert.equal(moved.status,'arrived');assert.equal(moved.recoveries,1);assert.equal(moved.observation.screenKey,'detail');
  const graph=await r.store.graph();assert.ok(graph.screens.some(s=>s.name==='Promo'),'the detour itself became part of the map');assert.ok(graph.transitions.some(e=>e.evidence.some(x=>x.diverged)),'the divergence is kept as evidence');await r.close();});
 
 test('a form is filled again with what was typed when the route was learned',async t=>{const world={},r=await setup(t,world);await learn(r);
- const moved=await r.goto({target:'app',screen:'Account'});assert.equal(moved.status,'arrived');assert.equal(moved.observation.screenKey,'account');assert.deepEqual(moved.results.map(x=>x.step.action.type),['click','fill','click']);
+ const moved=await r.goto({mode:'record',target:'app',screen:'Account'});assert.equal(moved.status,'arrived');assert.equal(moved.observation.screenKey,'account');assert.deepEqual(moved.results.map(x=>x.step.action.type),['click','fill','click']);
  assert.equal((await r.finish(moved.runId)).metrics.agentCalls,0);await r.close();});
 
 test('stuck on unknown ground: the agent takes a step, and the next goto has learned it',async t=>{const world={entry:'maintenance'},r=await setup(t,world);world.entry='home';await learn(r);world.entry='maintenance';
- const first=await r.goto({target:'app',screen:'Detail'});assert.equal(first.status,'stuck');assert.equal(first.steps,0);assert.equal(first.observation.screenKey,'maintenance');assert.match(first.reason,/No known action/);assert.ok(first.hint);assert.equal(first.runStatus,'running','the mission stays open for the agent');assert.equal(world.restarts,1,'its own mission begins with a cold start, once');
+ const first=await r.goto({mode:'record',target:'app',screen:'Detail'});assert.equal(first.status,'stuck');assert.equal(first.steps,0);assert.equal(first.observation.screenKey,'maintenance');assert.match(first.reason,/No known action/);assert.ok(first.hint);assert.equal(first.runStatus,'running','the mission stays open for the agent');assert.equal(world.restarts,1,'its own mission begins with a cold start, once');
  const graph=await r.store.graph(),detail=graph.screens.find(s=>s.name==='Detail');assert.equal(graph.routes[detail.id].stuckAt,graph.screens.find(s=>s.name==='Maintenance').id);
  // One step by the agent, then the same mission is carried on without it.
  await click(r,{id:first.runId},'continue');const rest=await r.goto({screen:'Detail'});assert.equal(rest.status,'arrived');assert.equal(rest.runId,first.runId);assert.equal(rest.started,false);assert.equal((await r.finish(first.runId)).metrics.agentCalls,1);
- const second=await r.goto({target:'app',screen:'Detail'});assert.equal(second.status,'arrived');assert.equal(second.steps,3,'maintenance → home → list → detail');assert.equal((await r.finish(second.runId)).metrics.agentCalls,0);
+ const second=await r.goto({mode:'record',target:'app',screen:'Detail'});assert.equal(second.status,'arrived');assert.equal(second.steps,3,'maintenance → home → list → detail');assert.equal((await r.finish(second.runId)).metrics.agentCalls,0);
  const memo=(await r.store.graph()).routes[detail.id];assert.equal(memo.runs,3);assert.equal(memo.arrived,2);assert.equal(memo.stuckAt,undefined);await r.close();});
 
 test('a deeplink that needs a session falls back to the taps, and the miss is remembered',async t=>{const world={},r=await setup(t,world);await learn(r);
  const run=await r.start({target:'app',mode:'exploratory',objective:'Orders'});await click(r,run,'account');await r.step(run.id,{type:'fill',elementId:elementId('email'),value:'ana@test.dev'});await click(r,run,'enter');await click(r,run,'orders');await r.step(run.id,{type:'back'});
  assert.equal((await r.step(run.id,{type:'deeplink',url:'app://orders'})).observation.screenKey,'orders');await r.finish(run.id);
  // A new launch has no session: the link, the shortest way, lands on login. The walk carries on from there with what it knows.
- world.session=false;const cold=await r.goto({target:'app',screen:'Orders'});assert.equal(cold.status,'arrived');assert.deepEqual(cold.results.map(x=>[x.step.action.type,x.status]),[['deeplink','diverged'],['fill','completed'],['click','completed'],['click','completed']]);
+ world.session=false;const cold=await r.goto({mode:'record',target:'app',screen:'Orders'});assert.equal(cold.status,'arrived');assert.deepEqual(cold.results.map(x=>[x.step.action.type,x.status]),[['deeplink','diverged'],['fill','completed'],['click','completed'],['click','completed']]);
  const link=(await r.store.graph()).transitions.find(e=>e.action.type==='deeplink'&&e.walks);assert.equal(link.misses,1);
- await r.finish(cold.runId);const next=await r.goto({target:'app',screen:'Orders'});assert.equal(next.status,'arrived');assert.notEqual(next.results[0].step.action.type,'deeplink','the steadier taps are preferred after the miss');await r.close();});
+ await r.finish(cold.runId);const next=await r.goto({mode:'record',target:'app',screen:'Orders'});assert.equal(next.status,'arrived');assert.notEqual(next.results[0].step.action.type,'deeplink','the steadier taps are preferred after the miss');await r.close();});
 
 test('getting somewhere never buys anything on the way: a write off the needed route is not followed',async t=>{const world={},r=await setup(t,world);await learn(r);
  // The only recorded way forward from the product is buying it, which ends at home.

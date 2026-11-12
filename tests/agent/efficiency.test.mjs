@@ -10,7 +10,7 @@ import {planRoute} from '../../agent/graph.mjs';
 import {CallLog,normalizePath,parseHttpLog,mergeApis,recordingProxy} from '../../agent/network.mjs';
 import {parseDeeplinks,parseHierarchy} from '../../agent/executors/android.mjs';
 import {briefStep,briefMemory,briefStart} from '../../agent/brief.mjs';
-const config={version:2,kind:'navloom-agent-project',id:'test',name:'Test app',targets:{web:{platform:'web',url:'http://127.0.0.1:4790',origins:['http://127.0.0.1:4790']}},permissions:{actions:['open','click','fill','scroll','back','wait','deeplink'],deeplinkPrefixes:[],pluginCapabilities:['read_graph'],pluginImages:[]}};
+const config={version:2,kind:'navloom-agent-project',review:'auto',id:'test',name:'Test app',targets:{web:{platform:'web',url:'http://127.0.0.1:4790',origins:['http://127.0.0.1:4790']}},permissions:{actions:['open','click','fill','scroll','back','wait','deeplink'],deeplinkPrefixes:[],pluginCapabilities:['read_graph'],pluginImages:[]}};
 
 class Shop{
  constructor(){this.state='home';this.calls=new CallLog();}
@@ -26,7 +26,7 @@ test('steps record API calls without secrets and agents receive a compact result
  assert.deepEqual(result.step.network.map(c=>[c.method,c.host,c.path,c.status]),[['POST','api.test','/api/orders/{id}',201]]);
  const graph=await r.store.graph();assert.deepEqual(graph.transitions[0].apis,[{method:'POST',host:'api.test',path:'/api/orders/{id}',statuses:[201],count:1}]);
  const brief=await briefStep(result,r.store),full=JSON.stringify(result),small=JSON.stringify(brief);
- assert.deepEqual(brief.api,['POST /api/orders/{id} 201']);assert.equal(brief.changed,'screen');assert.equal(brief.elements[0].id,'01234567');assert.ok(!small.includes('hierarchy/'));assert.ok(small.length<full.length/2,`${small.length} vs ${full.length}`);
+ assert.deepEqual(brief.api,['POST /api/orders/{id} 201']);assert.equal(brief.changed,'screen');assert.match(brief.elements[0],/^01234567 /);assert.ok(!small.includes('hierarchy/'));assert.ok(small.length<full.length/2,`${small.length} vs ${full.length}`);
  // The raw hierarchy stays in the evidence file only.
  assert.equal((await r.store.run(run.id)).observations.at(-1).xml,undefined);assert.ok((await r.store.resource(`evidence/${result.observation.id}.json`)).toString().includes('<hierarchy/>'));
  await r.finish(run.id);});

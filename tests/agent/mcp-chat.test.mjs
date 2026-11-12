@@ -9,12 +9,12 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {ElicitRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {TIERS} from '../../agent/operations.mjs';
-const config={version:2,kind:'navloom-agent-project',id:'chat',name:'Chat app',targets:{web:{platform:'web',url:'http://127.0.0.1:4790',origins:['http://127.0.0.1:4790']}},permissions:{actions:['open','click','fill','wait'],pluginCapabilities:[]}};
+const config={version:2,kind:'navloom-agent-project',review:'auto',id:'chat',name:'Chat app',targets:{web:{platform:'web',url:'http://127.0.0.1:4790',origins:['http://127.0.0.1:4790']}},permissions:{actions:['open','click','fill','wait'],pluginCapabilities:[]}};
 async function connect(root,{elicitation,tools}={}){const client=new Client({name:'test-client',version:'1'},elicitation?{capabilities:{elicitation:{}}}:undefined);const env={...process.env};if(tools)env.NAVLOOM_MCP_TOOLS=tools;await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('scripts/agent-mcp.mjs'),root],env}));return client;}
 const parse=result=>JSON.parse(result.content.find(c=>c.type==='text').text);
 test('core tool tier is small; extended and all widen it; descriptions stay short',async t=>{
  const root=await mkdtemp(join(tmpdir(),'navloom-mcp-')),service=await createService({root,port:0});t.after(async()=>{await service.close();await rm(root,{recursive:true,force:true});});
- const core=await connect(root);t.after(()=>core.close());const {tools}=await core.listTools();assert.equal(tools.length,TIERS.core.length);assert.ok(tools.every(x=>x.description.length<=260),'core descriptions are short');assert.ok(JSON.stringify(tools).length<16500,'core catalog under 16.5k chars (33k with every tool): the core tier also carries goto, organize and the learned-script tools');assert.ok(!tools.some(x=>x.name==='navloom_configure'));
+ const core=await connect(root);t.after(()=>core.close());const {tools}=await core.listTools();assert.equal(tools.length,TIERS.core.length);assert.ok(tools.every(x=>x.description.length<=260),'core descriptions are short');const size=JSON.stringify(tools).length;assert.ok(size<14500,`core catalog under 14.5k chars, got ${size}: route/replay, capabilities, deeplinks and describe live in the extended tier`);assert.ok(!tools.some(x=>x.name==='navloom_configure'));
  const all=await connect(root,{tools:'all'});t.after(()=>all.close());assert.ok((await all.listTools()).tools.some(x=>x.name==='navloom_configure'));
  const extended=await connect(root,{tools:'extended'});t.after(()=>extended.close());assert.equal((await extended.listTools()).tools.length,TIERS.extended.length);
 });

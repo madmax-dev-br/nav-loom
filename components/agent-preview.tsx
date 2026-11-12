@@ -6,29 +6,25 @@ import {splitApis,screenApis} from '@/lib/api-role.mjs';
 type Obj=Record<string,any>;
 type Step={stateId:string;edge?:Obj};
 const apiText=(api:Obj)=>`${api.method} ${api.path}`;
-/** How long the preview holds on "loading" for a transition that called the backend. The real duration is shown in the card. */
-const REQUEST_MS=2000;
 
 /**
  * Walk the recorded application like a prototype: tapping a control follows the transition that was observed from
  * the state on display. Nothing touches the device; a control nobody followed says so instead of guessing.
  */
 export function AgentPreview({graph,runs,observations,projectId,startStateId,onClose}:{graph:Obj;runs:Obj[];observations:Obj[];projectId:string;startStateId:string;onClose:()=>void}){
- const [trail,setTrail]=useState<Step[]>([{stateId:startStateId}]),[notice,setNotice]=useState<{kind:'unmapped'|'choice'|'empty';text:string;choices?:Obj[]}|null>(null),[hint,setHint]=useState(false),[pending,setPending]=useState<Obj|null>(null),[opened,setOpened]=useState<{api:Obj;call?:Obj;role:string}|null>(null),timer=useRef<ReturnType<typeof setTimeout>|null>(null);
+ const [trail,setTrail]=useState<Step[]>([{stateId:startStateId}]),[notice,setNotice]=useState<{kind:'unmapped'|'choice'|'empty';text:string;choices?:Obj[]}|null>(null),[hint,setHint]=useState(false),[leaving,setLeaving]=useState<string|null>(null),[opened,setOpened]=useState<{api:Obj;call?:Obj;role:string}|null>(null),shown=useRef<string|null>(null);
  const captureOf=useMemo(()=>{const map=new Map<string,Obj>();for(const o of observations)map.set(o.stateId,o);return map;},[observations]);
  const stateOf=(id:string)=>graph.states.find((s:Obj)=>s.id===id),screenOfState=(id:string)=>graph.screens.find((s:Obj)=>s.id===stateOf(id)?.screenId);
  const stateLabel=(id:string)=>stateOf(id)?.name||captureOf.get(id)?.stateKey||'estado';
  const current=trail.at(-1)!,capture=captureOf.get(current.stateId),screen=screenOfState(current.stateId);
  const outgoing=useMemo(()=>{const all=graph.transitions.filter((t:Obj)=>t.confirmed&&t.from===current.stateId&&t.to!==t.from),key=(t:Obj)=>JSON.stringify(t.action)+t.to;return all.filter((t:Obj,i:number)=>all.findLastIndex((other:Obj)=>key(other)===key(t))===i);},[graph,current.stateId]);
  const timings=(edge:Obj)=>{const map=new Map<string,Obj>();for(const evidence of edge.evidence??[]){const step=runs.find(r=>r.id===evidence.runId)?.steps.find((s:Obj)=>s.id===evidence.stepId);for(const call of step?.network??[])map.set(apiText(call),call);}return map;};
- // A transition that called the backend pauses briefly on a loading state, with its requests shown beside the app, so the call is seen happening.
- const go=(edge:Obj)=>{setNotice(null);if(timer.current)clearTimeout(timer.current);
-  if(!edge.apis?.length){setPending(null);setTrail(old=>[...old,{stateId:edge.to,edge}]);return;}
-  setPending(edge);timer.current=setTimeout(()=>{setPending(null);setTrail(old=>[...old,{stateId:edge.to,edge}]);},REQUEST_MS);};
- useEffect(()=>()=>{if(timer.current)clearTimeout(timer.current);},[]);
+ const go=(edge:Obj)=>{setNotice(null);setTrail(old=>[...old,{stateId:edge.to,edge}]);};
+ // Screens cross-fade: the one being left stays on top for a moment and fades out while the next fades in beneath it.
+ const shot=capture?'/__navloom/agent/resource?path='+encodeURIComponent(capture.screenshot)+'&project='+encodeURIComponent(projectId):null;
+ useEffect(()=>{if(shown.current&&shown.current!==shot)setLeaving(shown.current);shown.current=shot;},[shot]);
  const describe=(edge:Obj)=>{const to=screenOfState(edge.to),same=to?.id===screen?.id,status=[...new Set((edge.apis??[]).flatMap((a:Obj)=>a.statuses??[]))].join('/');return `${same?`estado ${stateLabel(edge.to)}`:to?.name??'?'}${status?` · resposta ${status}`:''}`;};
  const tap=(element:Obj)=>{
-  if(pending)return;
   const edges=outgoing.filter((t:Obj)=>t.action?.elementIdentity===element.identity),name=element.label||element.name;
   if(!edges.length){setNotice({kind:'unmapped',text:`“${name}” ainda não foi mapeado: ninguém seguiu este controle a partir deste estado.`});flash();return;}
   // The same control can have been seen leading to different places (a success, an error); the person picks which to follow.
@@ -54,15 +50,15 @@ export function AgentPreview({graph,runs,observations,projectId,startStateId,onC
    <section className="walk-stage">
     <div className="walk-device">
      {capture?<div className={'walk-screen '+(hint?'is-hinting':'')} style={{aspectRatio:`${capture.viewport?.width??9} / ${capture.viewport?.height??19.5}`}} onClick={event=>{if(event.target===event.currentTarget||(event.target as HTMLElement).tagName==='IMG'){setNotice({kind:'empty',text:'Nada mapeado neste ponto. As áreas contornadas são os controles com caminho conhecido.'});flash();}}}>
-       <img src={'/__navloom/agent/resource?path='+encodeURIComponent(capture.screenshot)+'&project='+encodeURIComponent(projectId)} alt={`${screen?.name}, estado ${stateLabel(current.stateId)}`} draggable={false}/>
-       {pending&&<div className="walk-loading" role="status"><i className="walk-spinner"/><span>Carregando…</span></div>}
+       <img key={shot} className="walk-shot" src={shot!} alt={`${screen?.name}, estado ${stateLabel(current.stateId)}`} draggable={false}/>
+       {leaving&&leaving!==shot&&<img key={'out'+leaving} className="walk-shot is-leaving" src={leaving} alt="" aria-hidden="true" draggable={false} onAnimationEnd={()=>setLeaving(null)}/>}
      {capture.elements.filter((e:Obj)=>e.visible&&!e.disabled&&e.actions?.includes('click')).map((e:Obj)=><button key={e.id} className={'walk-hit '+(mappedIdentities.has(e.identity)?'is-mapped':'')} aria-label={(e.label||e.name)+(mappedIdentities.has(e.identity)?'':' (não mapeado)')} title={e.label||e.name} style={{left:e.bounds.x*100+'%',top:e.bounds.y*100+'%',width:e.bounds.width*100+'%',height:e.bounds.height*100+'%'}} onClick={event=>{event.stopPropagation();tap(e);}}/>)}
       </div>:<p className="walk-missing">Este estado foi registrado, mas não há captura dele nas execuções carregadas.</p>}
     </div>
     <div className="walk-side-actions">
-     {scrolls.map((t:Obj)=><button key={t.id} disabled={!!pending} onClick={()=>go(t)}>{t.action.direction==='up'?<ChevronsUp size={14}/>:<ChevronsDown size={14}/>} Rolar para {t.action.direction==='up'?'cima':'baixo'}: {describe(t)}</button>)}
-     {automatic.map((t:Obj)=><button key={t.id} disabled={!!pending} onClick={()=>go(t)}><Timer size={14}/> Aguardar: {describe(t)}</button>)}
-     {systemBack.map((t:Obj)=><button key={t.id} disabled={!!pending} onClick={()=>go(t)}><CornerUpLeft size={14}/> Voltar do sistema: {describe(t)}</button>)}
+     {scrolls.map((t:Obj)=><button key={t.id} onClick={()=>go(t)}>{t.action.direction==='up'?<ChevronsUp size={14}/>:<ChevronsDown size={14}/>} Rolar para {t.action.direction==='up'?'cima':'baixo'}: {describe(t)}</button>)}
+     {automatic.map((t:Obj)=><button key={t.id} onClick={()=>go(t)}><Timer size={14}/> Aguardar: {describe(t)}</button>)}
+     {systemBack.map((t:Obj)=><button key={t.id} onClick={()=>go(t)}><CornerUpLeft size={14}/> Voltar do sistema: {describe(t)}</button>)}
      <div className="walk-notice" role="status" aria-live="polite">{notice&&<div className={'is-'+notice.kind}>{notice.kind==='choice'?<MousePointerClick size={16}/>:<TriangleAlert size={16}/>}<p>{notice.text}</p>{notice.choices&&<div>{notice.choices.map((choice:Obj)=><button key={choice.id} onClick={()=>go(choice)}>{describe(choice)}</button>)}</div>}</div>}</div>
     </div>
    </section>
