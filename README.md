@@ -54,7 +54,7 @@ No PowerShell, defina `$env:NAVLOOM_AGENT_PROJECT="examples/agent-project"` ante
 
 Abra [o workspace local](http://127.0.0.1:5173/signin-with-chatgpt?return_to=/explore). O login desse endereço é uma simulação para desenvolvimento em loopback. Esses comandos não publicam o app na internet.
 
-O seletor **Projeto** troca projetos ou cria um novo Web/Android, com configuração, grafo e histórico separados. O serviço e o MCP precisam apontar para a mesma pasta indicada no painel. O editor visual anterior continua disponível em `/`.
+O seletor **Projeto** troca projetos ou cria um novo Web/Android, com configuração, grafo e histórico separados. O serviço e o MCP precisam apontar para a mesma pasta indicada no painel. A raiz `/` leva ao mesmo workspace.
 
 ## Skill para o agente
 
@@ -176,7 +176,6 @@ Componentes de plugins usam iframe isolado; lógica local usa containers restrit
 ## Verificação e limites atuais
 
 ```sh
-npm run test:model
 npm run test:agent
 npx tsc --noEmit
 npm run build

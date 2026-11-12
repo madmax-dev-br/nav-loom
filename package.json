@@ -13,7 +13,6 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "dev:local": "bash scripts/dev-local.sh",
-    "test:model": "node scripts/test-flow-model.mjs && node --test tests/project-files.test.mjs",
     "agent:serve": "node scripts/agent-service.mjs",
     "agent:mcp": "node scripts/agent-mcp.mjs",
     "test:agent": "node --test tests/agent/*.test.mjs"
