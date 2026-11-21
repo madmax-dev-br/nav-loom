@@ -44,7 +44,7 @@ export function briefObservation(o,graph,previous){
 export async function briefStep(result,store){
  if(!result?.observation)return {status:result.status,reason:result.reason,error:result.step?.error};
  const graph=await store.graph(),before=result.previous,after=result.observation;
- return {status:result.status,changed:after.screenId!==before?.screenId?'screen':after.stateId!==before?.stateId?'state':'none',...(result.step.network?.length?{api:result.step.network.map(apiLabel)}:{}),...briefObservation(after,graph,before)};
+ return {status:result.status,changed:after.screenId!==before?.screenId?'screen':after.stateId!==before?.stateId?'state':'none',...(result.step.network?.length?{api:result.step.network.map(apiLabel)}:{}),...(result.apiHint?{apiHint:result.apiHint}:{}),...briefObservation(after,graph,before)};
 }
 
 export async function briefStart(run,store){
@@ -66,7 +66,7 @@ export async function briefMove(result,store){
 export function briefRun(run,graph){
  const byId=new Map(run.observations.map(o=>[o.id,o])),name=id=>graph.screens.find(s=>s.id===byId.get(id)?.screenId)?.name;
  const errors=(run.diagnostics?.logs??[]).filter(l=>l.level==='error').slice(-8).map(l=>clip(l.message,200));
- return {runId:run.id,objective:run.objective,mode:run.mode,profile:run.profile,...(run.environment&&run.environment!=='default'?{environment:run.environment}:{}),status:run.status,...(run.review?{review:run.review.status,...(run.review.status==='pending'?{reviewNote:'Waiting for a person to approve in the interface (Execuções); the recorded map is unchanged until then.'}:{}),...(run.changes?.items.length?{changes:run.changes.items.slice(0,20).map(i=>`${i.type}: ${i.text}`)}:{})}:{}),...(run.stopReason?{stopReason:run.stopReason}:{}),...(run.result?{result:run.result}:{}),...(run.checks?.length?{checks:run.checks.map(c=>`${c.assertion.type}${c.assertion.value?' '+clip(c.assertion.value,40):''}: ${c.result}`)}:{}),metrics:run.metrics,...(run.coverage?{coverage:run.coverage}:{}),
+ return {runId:run.id,objective:run.objective,mode:run.mode,profile:run.profile,...(run.environment&&run.environment!=='default'?{environment:run.environment}:{}),status:run.status,...(run.review?{review:run.review.status,...(run.review.status==='pending'?{reviewNote:'Waiting for a person to approve in the interface (Execuções); the recorded map is unchanged until then.'}:{}),...(run.changes?.items.length?{changes:run.changes.items.slice(0,20).map(i=>`${i.type}: ${i.text}`)}:{})}:{}),...(run.stopReason?{stopReason:run.stopReason}:{}),...(run.networkHint&&!run.steps.some(s=>s.network?.length)?{apiHint:run.networkHint}:{}),...(run.result?{result:run.result}:{}),...(run.checks?.length?{checks:run.checks.map(c=>`${c.assertion.type}${c.assertion.value?' '+clip(c.assertion.value,40):''}: ${c.result}`)}:{}),metrics:run.metrics,...(run.coverage?{coverage:run.coverage}:{}),
   steps:run.steps.slice(-80).map((s,i)=>clip(`${Math.max(0,run.steps.length-80)+i} ${s.action.type}${s.transitionId?` "${clip(graph.transitions.find(t=>t.id===s.transitionId)?.name,30)}"`:''} ${name(s.before)??'?'} → ${name(s.after)??'?'}${s.network?.length?' ['+s.network.map(apiLabel).join(', ')+']':''}${s.status==='completed'?'':' '+s.status}${s.error?': '+s.error:''}`,260)),...(errors.length?{errors}:{})};
 }
 

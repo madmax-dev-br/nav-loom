@@ -131,7 +131,11 @@ export function dependableEdges(graph,{target,profile,environment='default',othe
  // Screens are shared between environments. With `otherEnvironments` a way learned in one (a mock) may be followed in another, but what this
  // environment has shown itself always wins: the same control may lead elsewhere here (a sign-in the mock skips).
  const usable=graph.transitions.filter(e=>e.confirmed&&e.target===target&&e.profile===profile&&(envOf(e)===environment||otherEnvironments)&&hash(e.preconditions)===wanted&&!e.action.point&&(allowUnverifiedVersion||e.version?.fingerprint===version?.fingerprint));
- const weight=e=>(e.evidence??[]).filter(x=>!x.diverged).length+(envOf(e)===environment?1000:0),outcomes=new Map(),landings=new Map();
+ // The same submit can stay on its screen (a form rejected: empty fields, a probe, a failed attempt) or leave it (accepted). Field values are
+ // not part of a state, so both are the same action from the same state. For routes the outcome that leaves wins: staying is never a way
+ // anywhere else, and goto checks where it lands and counts misses, so a wrong pick is corrected by the walks themselves.
+ const screenOf=new Map((graph.states??[]).map(s=>[s.id,s.screenId])),leaves=e=>e.action.type==='click'&&screenOf.get(e.to)!==screenOf.get(e.from)?1:0;
+ const weight=e=>(e.evidence??[]).filter(x=>!x.diverged).length+(envOf(e)===environment?1000:0)+leaves(e)*100000,outcomes=new Map(),landings=new Map();
  for(const edge of usable){const key=edge.from+JSON.stringify(edge.action),best=outcomes.get(key);if(!best||weight(edge)>=weight(best))outcomes.set(key,edge);if(edge.action.type==='deeplink'&&weight(edge))landings.set(edge.action.url,(landings.get(edge.action.url)??new Set()).add(edge.to));}
  return {edges:usable.filter(e=>outcomes.get(e.from+JSON.stringify(e.action))===e||e.to===outcomes.get(e.from+JSON.stringify(e.action)).to),landings};
 }

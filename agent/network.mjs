@@ -95,7 +95,7 @@ export function mergeApis(existing=[],calls=[],{count=true}={}){
 const METHODS='GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS';
 export function normalizeCall(call){
  let path=call.path,host=call.host??null;
- if(call.url){try{const u=new URL(call.url);path=u.pathname+(u.search?'?…':'');host=u.host;}catch{path=call.url;}}
+ if(call.url){try{const u=new URL(call.url);path=u.pathname+(u.search?'?…':'');host=u.host;}catch{const q=call.url.indexOf('?');path=q<0?call.url:call.url.slice(0,q)+'?…';}}
  return {method:(call.method||'GET').toUpperCase(),url:call.url??null,host,path:path||'/',status:call.status??null,type:call.type??'http',time:call.time??null,durationMs:call.durationMs??null,requestPreview:call.requestPreview??null,responsePreview:call.responsePreview??null,contentType:call.contentType??null};
 }
 /** Parse HTTP activity from Android logcat lines (OkHttp logging, Log lines with "HTTP 200 /path", "GET https://..."). */

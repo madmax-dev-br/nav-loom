@@ -17,8 +17,10 @@ export class Help{
  /** Harness entries that apply to a screen, state, element or secret reference. */
  known(graph,{screenId,stateId,elementIdentity,kind,secretRef,question}={}){return (graph.harness??[]).filter(e=>{if(question&&!screenId&&!e.screenId&&e.kind===kind&&e.question===question)return true;if(secretRef&&e.answer?.secretRef===secretRef)return true;if(elementIdentity&&e.elementIdentity===elementIdentity&&(!screenId||e.screenId===screenId))return true;if(stateId&&e.stateId===stateId&&(!kind||e.kind===kind)&&!e.elementIdentity)return true;if(screenId&&e.screenId===screenId&&!e.elementIdentity&&(!kind||e.kind===kind))return true;return false;});}
  /** What this observation needs from a person and what the harness already knows about it. */
- help(graph,observation){
-  const needs=(observation.elements??[]).filter(e=>e.sensitive).map(e=>{const entry=this.known(graph,{screenId:observation.screenId,elementIdentity:e.identity})[0]??this.known(graph,{screenId:observation.screenId,kind:'credential'})[0];return {kind:'credential',elementId:e.id,elementIdentity:e.identity,name:e.name,known:entry?.id??null,secretRef:entry?.answer?.secretRef??null,hint:entry?'Use navloom_step fill with this secretRef.':'Ask with navloom_ask kind credential; the answer is stored as a local secret and remembered.'};});
+ help(graph,observation,profileSecrets=[]){
+  // A secret the profile already provides comes before asking a person: the password one when there are several.
+  const profileRef=profileSecrets.length===1?profileSecrets[0]:profileSecrets.find(r=>/pass|senha/i.test(r))??null;
+  const needs=(observation.elements??[]).filter(e=>e.sensitive).map(e=>{const entry=this.known(graph,{screenId:observation.screenId,elementIdentity:e.identity})[0]??this.known(graph,{screenId:observation.screenId,kind:'credential'})[0];const secretRef=entry?.answer?.secretRef??profileRef;return {kind:'credential',elementId:e.id,elementIdentity:e.identity,name:e.name,known:entry?.id??(profileRef?'profile':null),secretRef,profileSecrets:profileSecrets.length?profileSecrets:undefined,hint:secretRef?'Use navloom_step fill with this secretRef.':'Ask with navloom_ask kind credential; the answer is stored as a local secret and remembered.'};});
   const hints=this.known(graph,{screenId:observation.screenId,stateId:observation.stateId}).filter(e=>!needs.some(n=>n.known===e.id)).map(e=>({id:e.id,kind:e.kind,question:e.question,answer:publicAnswer(e.answer)}));
   return {needs,hints};
  }
