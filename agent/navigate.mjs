@@ -1,4 +1,20 @@
 import {dependableEdges} from './graph.mjs';
+import {locate,norm} from './recognize.mjs';
+/**
+ * A tab works from every screen that shows the tab bar. A tapped control is taken for a tab when it sits in the tab bar
+ * and the screen it opened shows, as its selected section, a tab of the same name. For every recorded state whose tab bar
+ * shows that tab, the tap becomes a way from there too (same transition id, so its walks and misses still add up).
+ */
+export function tabEdges(graph,edges){
+ const screens=new Map(graph.screens.map(s=>[s.id,s])),stateScreen=new Map(graph.states.map(s=>[s.id,s.screenId])),out=[];
+ const section=(screenId,name)=>{const p=screens.get(screenId)?.profile;const n=p?.tokens?.['n:'+norm(name).slice(0,40)]??0;return p?.n&&n/p.n>=.6;};
+ const inBar=h=>h.bounds&&h.bounds.y+h.bounds.height/2>.88&&h.actions?.includes('click');
+ const seen=new Set();
+ for(const edge of edges){if(edge.action.type!=='click'||!edge.name||writes(edge))continue;const to=stateScreen.get(edge.to);if(!section(to,edge.name))continue;const key=edge.name+'>'+to;if(seen.has(key))continue;seen.add(key);
+  for(const state of graph.states){if(state.id===edge.from||stateScreen.get(state.id)===to||state.scrollOf||state.keyboard)continue;if(!(state.hotspots??[]).some(h=>inBar(h)&&norm(h.label??h.name)===norm(edge.name)))continue;out.push({...edge,from:state.id,tab:true});}}
+ return out;
+}
+import {envOf} from './schema.mjs';
 
 /**
  * The decision graph for one destination: for every state the project has seen, the single next action that leads
@@ -9,12 +25,13 @@ import {dependableEdges} from './graph.mjs';
  * Likewise for reliability: an action that landed somewhere else when it was followed pays for it, so a route
  * that keeps diverging is replaced by a steadier one, and earns its place back as it succeeds again.
  */
-export function decisionGraph(graph,{goals,target,profile,preconditions={},version,allowDeeplinks=false,avoid=new Set(),entries=[]}){
- const {edges,landings}=dependableEdges(graph,{target,profile,preconditions,version,allowUnverifiedVersion:true});
+export function decisionGraph(graph,{goals,target,profile,environment='default',preconditions={},version,allowDeeplinks=false,avoid=new Set(),entries=[]}){
+ const {edges,landings}=dependableEdges(graph,{target,profile,environment,otherEnvironments:true,preconditions,version,allowUnverifiedVersion:true});
  // `walks`/`misses` are kept by goto: how often this action was taken on the way somewhere, and how often the app landed elsewhere.
- const cost=e=>{const misses=e.misses??0,hits=(e.walks??0)-misses;return (e.cost??1)+3*misses/(hits+1)+(writes(e)?2:0)+(version&&e.version?.fingerprint!==version.fingerprint?.5:0);};
+ const cost=e=>{const misses=e.misses??0,hits=(e.walks??0)-misses;return (e.cost??1)+3*misses/(hits+1)+(writes(e)?2:0)+(version&&e.version?.fingerprint!==version.fingerprint?.5:0)+(envOf(e)===environment?0:1);};
+ // A way only seen in another environment costs a little more: the screens are the same, but this environment has not confirmed it yet.
  // `back` depends on the back stack, so it is never a planned decision; it is only tried as recovery.
- const steps=edges.filter(e=>!avoid.has(e.id)&&e.from!==e.to&&!['back','deeplink'].includes(e.action.type));
+ const direct=edges.filter(e=>!avoid.has(e.id)&&e.from!==e.to&&!['back','deeplink'].includes(e.action.type)),steps=[...direct,...tabEdges(graph,direct)];
  const solve=walk=>{const left=new Map([...goals].map(id=>[id,0])),next=new Map();for(let changed=true;changed;){changed=false;for(const edge of walk){const rest=left.get(edge.to);if(rest===undefined)continue;const total=rest+cost(edge);if(total<(left.get(edge.from)??Infinity)){left.set(edge.from,total);next.set(edge.from,edge);changed=true;}}}return {left,next};};
  let {left,next}=solve(steps);
  // Getting somewhere must not buy or transfer anything on the way. A write is only followed when the way from the entry
@@ -26,7 +43,8 @@ export function decisionGraph(graph,{goals,target,profile,preconditions={},versi
  // A deeplink starts from anywhere, as long as it has only ever landed in one place.
  let shortcut=null;if(allowDeeplinks)for(const edge of edges){if(edge.action.type!=='deeplink'||avoid.has(edge.id)||landings.get(edge.action.url)?.size!==1||!left.has(edge.to))continue;const total=left.get(edge.to)+cost(edge);if(!shortcut||total<shortcut.left)shortcut={edge,left:total};}
  const screenOf=new Map(graph.states.map(s=>[s.id,s.screenId]));
- const usable=(edge,observation)=>{const wanted=edge.action.elementIdentity;if(!wanted)return true;const element=observation.elements.find(e=>e.identity===wanted);return !!element&&!element.disabled;};
+ // The control may have moved or changed its text since the route was learned (a list that grew, a counter): it is located, not matched exactly.
+ const usable=(edge,observation)=>{const wanted=edge.action.elementIdentity;if(!wanted)return true;const element=locate(observation.elements,wanted,edge.name);return !!element&&!element.disabled;};
  // A control that was used from two or more screens and always opened the same one is taken to work wherever it is on view.
  const anywhere=new Map();{const seen=new Map();for(const edge of steps){const wanted=edge.action.elementIdentity;if(edge.action.type!=='click'||!wanted||writes(edge))continue;const entry=seen.get(wanted)??{from:new Set(),to:new Set(),best:null};entry.from.add(screenOf.get(edge.from));entry.to.add(screenOf.get(edge.to));if(left.has(edge.to)&&(!entry.best||left.get(edge.to)<left.get(entry.best.to)))entry.best=edge;seen.set(wanted,entry);}
   for(const [wanted,entry] of seen)if(entry.from.size>=2&&entry.to.size===1&&entry.best)anywhere.set(wanted,entry.best);}

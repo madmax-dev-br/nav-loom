@@ -6,7 +6,7 @@ import {uid,now} from './store.mjs';
  * only in the ignored .navloom/secrets.json; the versioned harness keeps the question, the context and the
  * secret reference, never the value.
  */
-export const HELP_KINDS=['credential','input','decision','precondition','environment','other'];
+export const HELP_KINDS=['credential','input','decision','precondition','environment','account','other'];
 export class Help{
  constructor(store){this.store=store;}
  async requests(){return this.store.json('requests.json',[]);}
@@ -15,10 +15,12 @@ export class Help{
  async saveSecret(ref,value){const all=await this.secrets();all[ref]=value;await this.store.atomic(join(this.store.dir,'secrets.json'),JSON.stringify(all,null,2));}
  async forgetSecret(ref){const all=await this.secrets();delete all[ref];await this.store.atomic(join(this.store.dir,'secrets.json'),JSON.stringify(all,null,2));}
  /** Harness entries that apply to a screen, state, element or secret reference. */
- known(graph,{screenId,stateId,elementIdentity,kind,secretRef}={}){return (graph.harness??[]).filter(e=>{if(secretRef&&e.answer?.secretRef===secretRef)return true;if(elementIdentity&&e.elementIdentity===elementIdentity&&(!screenId||e.screenId===screenId))return true;if(stateId&&e.stateId===stateId&&(!kind||e.kind===kind)&&!e.elementIdentity)return true;if(screenId&&e.screenId===screenId&&!e.elementIdentity&&(!kind||e.kind===kind))return true;return false;});}
+ known(graph,{screenId,stateId,elementIdentity,kind,secretRef,question}={}){return (graph.harness??[]).filter(e=>{if(question&&!screenId&&!e.screenId&&e.kind===kind&&e.question===question)return true;if(secretRef&&e.answer?.secretRef===secretRef)return true;if(elementIdentity&&e.elementIdentity===elementIdentity&&(!screenId||e.screenId===screenId))return true;if(stateId&&e.stateId===stateId&&(!kind||e.kind===kind)&&!e.elementIdentity)return true;if(screenId&&e.screenId===screenId&&!e.elementIdentity&&(!kind||e.kind===kind))return true;return false;});}
  /** What this observation needs from a person and what the harness already knows about it. */
- help(graph,observation){
-  const needs=(observation.elements??[]).filter(e=>e.sensitive).map(e=>{const entry=this.known(graph,{screenId:observation.screenId,elementIdentity:e.identity})[0]??this.known(graph,{screenId:observation.screenId,kind:'credential'})[0];return {kind:'credential',elementId:e.id,elementIdentity:e.identity,name:e.name,known:entry?.id??null,secretRef:entry?.answer?.secretRef??null,hint:entry?'Use navloom_step fill with this secretRef.':'Ask with navloom_ask kind credential; the answer is stored as a local secret and remembered.'};});
+ help(graph,observation,profileSecrets=[]){
+  // A secret the profile already provides comes before asking a person: the password one when there are several.
+  const profileRef=profileSecrets.length===1?profileSecrets[0]:profileSecrets.find(r=>/pass|senha/i.test(r))??null;
+  const needs=(observation.elements??[]).filter(e=>e.sensitive).map(e=>{const entry=this.known(graph,{screenId:observation.screenId,elementIdentity:e.identity})[0]??this.known(graph,{screenId:observation.screenId,kind:'credential'})[0];const secretRef=entry?.answer?.secretRef??profileRef;return {kind:'credential',elementId:e.id,elementIdentity:e.identity,name:e.name,known:entry?.id??(profileRef?'profile':null),secretRef,profileSecrets:profileSecrets.length?profileSecrets:undefined,hint:secretRef?'Use navloom_step fill with this secretRef.':'Ask with navloom_ask kind credential; the answer is stored as a local secret and remembered.'};});
   const hints=this.known(graph,{screenId:observation.screenId,stateId:observation.stateId}).filter(e=>!needs.some(n=>n.known===e.id)).map(e=>({id:e.id,kind:e.kind,question:e.question,answer:publicAnswer(e.answer)}));
   return {needs,hints};
  }
@@ -38,6 +40,8 @@ export class Help{
   const requests=await this.requests(),request=requests.find(r=>r.id===requestId);if(!request)throw Error('Unknown request');if(request.status!=='pending')throw Error('Request already answered');
   const isSecret=secret??request.kind==='credential';let answer;
   if(isSecret){if(typeof value!=='string'||!value.length)throw Error('A secret answer needs a value');const ref=secretRef||request.secretRef||`help_${request.kind}_${request.id.slice(0,8)}`;if(!/^[a-zA-Z0-9][\w-]{0,60}$/.test(ref))throw Error('Invalid secret reference');await this.saveSecret(ref,value);answer={type:'secretRef',secretRef:ref};}
+  // Which account to use: an existing profile, or one a person has just created with its sign-in kept as local secrets.
+  else if(request.kind==='account'&&option!==undefined)answer={type:'profile',profile:String(option)};
   else if(option!==undefined)answer={type:'option',value:String(option)};
   else if(instruction)answer={type:'instruction',value:instruction};
   else if(typeof value==='string')answer={type:'value',value};

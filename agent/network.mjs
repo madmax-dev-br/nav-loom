@@ -11,23 +11,25 @@ export function normalizePath(path){
 /** Calls observed while the application runs. Only method, host, path template, status and duration are kept. */
 export class CallLog{
  constructor(){this.calls=[];this.cursor=0;this.sequence=0;this.pending=new Set();}
- begin({method,url,host,path,source}){
+ /** `at` is when the call happened (host clock, ms): a log line read later still says when it was written. */
+ begin({method,url,host,path,source,at}){
   if(url){try{const parsed=new URL(url);host=parsed.host;path=parsed.pathname;}catch{path=url;}}
-  const call={id:`c${++this.sequence}`,method:String(method||'GET').toUpperCase(),host:host||'',path:normalizePath(path),status:null,ms:null,source,t0:Date.now()};
+  const call={id:`c${++this.sequence}`,method:String(method||'GET').toUpperCase(),host:host||'',path:normalizePath(path),status:null,ms:null,source,t0:Number.isFinite(at)?at:Date.now()};
   this.calls.push(call);if(this.calls.length>2000){this.calls.shift();this.cursor=Math.max(0,this.cursor-1);}return call;
  }
  end(call,status,ms){if(!call||call.status!==null)return;call.status=status;call.ms=ms??Date.now()-call.t0;}
  /** A completed call reported at once (logs), matched to an open request when one exists. */
- complete({method,url,status,ms,source}){
+ complete({method,url,status,ms,source,at}){
   let host='',path=url;try{const parsed=new URL(url);host=parsed.host;path=parsed.pathname;}catch{}path=normalizePath(path);
   const open=this.calls.findLast(c=>c.status===null&&c.source===source&&c.host===host&&c.path===path&&(!method||c.method===method));
   // The same response seen through another source (proxy and log line) is one call, not two.
-  const twin=open?null:this.calls.findLast(c=>c.source!==source&&c.path===path&&c.status===status&&Date.now()-c.t0<8000&&(!host||!c.host||c.host===host)&&(!method||c.method===method));if(twin)return twin;
-  const call=open??this.begin({method:method||'?',host,path,source});this.end(call,status,ms??null);return call;
+  const when=Number.isFinite(at)?at:Date.now(),twin=open?null:this.calls.findLast(c=>c.source!==source&&c.path===path&&c.status===status&&Math.abs(when-c.t0)<8000&&(!host||!c.host||c.host===host)&&(!method||c.method===method));if(twin)return twin;
+  // A line written when the response came back: the call began its duration earlier.
+  const call=open??this.begin({method:method||'?',host,path,source,at:Number.isFinite(at)?at-(ms??0):undefined});this.end(call,status,ms??null);return call;
  }
  /** New calls since the previous drain, plus results of calls that were still in flight then. */
  drain(){
-  const view=c=>({id:c.id,method:c.method,host:c.host,path:c.path,status:c.status,ms:c.ms,...(c.detail&&c.status!==null?{detail:c.detail}:{})});
+  const view=c=>({id:c.id,method:c.method,host:c.host,path:c.path,status:c.status,ms:c.ms,at:c.t0,...(c.detail&&c.status!==null?{detail:c.detail}:{})});
   const late=[...this.pending].filter(c=>c.status!==null);for(const call of late)this.pending.delete(call);
   const fresh=this.calls.slice(this.cursor);this.cursor=this.calls.length;for(const call of fresh)if(call.status===null)this.pending.add(call);
   return {calls:fresh.map(view),late:late.map(view)};
@@ -93,7 +95,7 @@ export function mergeApis(existing=[],calls=[],{count=true}={}){
 const METHODS='GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS';
 export function normalizeCall(call){
  let path=call.path,host=call.host??null;
- if(call.url){try{const u=new URL(call.url);path=u.pathname+(u.search?'?…':'');host=u.host;}catch{path=call.url;}}
+ if(call.url){try{const u=new URL(call.url);path=u.pathname+(u.search?'?…':'');host=u.host;}catch{const q=call.url.indexOf('?');path=q<0?call.url:call.url.slice(0,q)+'?…';}}
  return {method:(call.method||'GET').toUpperCase(),url:call.url??null,host,path:path||'/',status:call.status??null,type:call.type??'http',time:call.time??null,durationMs:call.durationMs??null,requestPreview:call.requestPreview??null,responsePreview:call.responsePreview??null,contentType:call.contentType??null};
 }
 /** Parse HTTP activity from Android logcat lines (OkHttp logging, Log lines with "HTTP 200 /path", "GET https://..."). */

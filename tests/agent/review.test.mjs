@@ -35,7 +35,7 @@ test('record: the map only changes when a person approves, and a discarded missi
  assert.deepEqual(names(await r.store.graph()),[],'after the mission, reading the graph is reading the recorded map');assert.match(briefRun(done,await r.store.graph()).reviewNote,/approve/);
  const view=await r.review({runId:run.id});assert.deepEqual(names(view.graph),['Detail','Home','List']);
  const approved=await r.decideReview({runId:run.id,decision:'approve'});assert.equal(approved.review.status,'approved');assert.deepEqual(names(await r.store.recorded()),['Detail','Home','List']);assert.equal((await r.store.recorded()).transitions.length,2);
- await assert.rejects(r.decideReview({runId:run.id,decision:'approve'}),/nothing waiting/);assert.deepEqual((await readdir(join(r.store.dir,'drafts'))),[]);
+ await assert.rejects(r.decideReview({runId:run.id,decision:'approve'}),/nothing waiting/);assert.deepEqual((await readdir(join(r.store.dir,'drafts'))),['archive'],'nothing left waiting; the discarded draft is kept in the archive');assert.ok((await readdir(join(r.store.dir,'drafts','archive'))).includes(`${run.id}.json`));
  const extra=await r.start({target:'app',mode:'record',objective:'Sobre'});await click(r,extra,'about');const stopped=await r.pause(extra.id);assert.equal(stopped.review.status,'pending');
  assert.equal((await r.decideReview({runId:extra.id,decision:'discard'})).review.status,'discarded');assert.deepEqual(names(await r.store.recorded()),['Detail','Home','List']);await r.close();});
 
@@ -68,9 +68,11 @@ test('validate: the same action from the same state landing elsewhere is a diffe
  const item=done.changes.items.find(i=>i.kind==='destination');assert.equal(item.type,'different');assert.match(item.text,/“item” em List levou a Soldout; o gravado leva a Detail/);
  const graph=await r.store.recorded();assert.equal(graph.screens.find(s=>s.id===item.expectedScreen).name,'Detail');await r.close();});
 
-test('walk: nothing is recorded or compared, whatever the app shows',async t=>{const world={},r=await setup(t,world);await recorded(r);const before=JSON.stringify((await r.store.recorded()).screens);
+test('walk: nothing is recorded by itself; a new place it reached waits for a person',async t=>{const world={},r=await setup(t,world);await recorded(r);const before=JSON.stringify((await r.store.recorded()).screens);
  world.soldOut=true;const run=await r.start({target:'app',mode:'walk',objective:'Só andar'});await click(r,run,'about');await click(r,run,'ok');await click(r,run,'list');await click(r,run,'item');
- const done=await r.finish(run.id);assert.equal(done.review.status,'walk');assert.equal(done.changes,undefined);assert.equal(JSON.stringify((await r.store.recorded()).screens),before);
+ // Walking into a screen the map never had is kept for a decision, never recorded by itself; discarding it leaves the map as it was.
+ const done=await r.finish(run.id);assert.equal(done.review.status,'pending');assert.equal(done.review.kept,'walk_found_new');assert.equal(JSON.stringify((await r.store.recorded()).screens),before);
+ await r.decideReview({runId:run.id,decision:'discard'});assert.equal(JSON.stringify((await r.store.recorded()).screens),before);
  // goto opens a walk of its own unless told otherwise.
  world.soldOut=false;const moved=await r.goto({target:'app',screen:'Detail'});assert.equal(moved.status,'arrived');const walk=await r.finish(moved.runId);assert.equal(walk.mode,'walk');assert.equal(walk.review.status,'walk');
  const graph=await r.store.recorded();assert.equal(graph.routes[graph.screens.find(s=>s.name==='Detail').id].arrived,1,'how dependable the direct route is survives the walk');await r.close();});
@@ -89,3 +91,16 @@ test('only a person approves: the decision is not an MCP tool, and a blocked mis
  class Broken extends App{async act(){throw Error('Target disappeared');}}r.factory=()=>Object.assign(new Broken({}),{harness:r.harness});
  const run=await r.start({target:'app',mode:'record',objective:'Quebra'});assert.equal((await click(r,run,'list')).status,'blocked');assert.equal((await r.store.run(run.id)).review.status,'open');
  const status=await r.status({detail:'full'});assert.equal(status.runs.find(x=>x.id===run.id).review.status,'pending','the entry screen it saw still waits for a decision');await r.close();});
+
+test('nothing found is lost: a walk that went somewhere new waits, a discard can be undone, a lost base is rebuilt',async t=>{const world={},r=await setup(t,world);await recorded(r);
+ // A walk (what goto opens) that ended up where the map had never been: kept for a decision instead of dropped.
+ world.soldOut=true;const walk=await r.start({target:'app',mode:'walk',objective:'Só andar'});await click(r,walk,'list');await click(r,walk,'item');const done=await r.finish(walk.id);
+ assert.equal(done.review.status,'pending');assert.equal(done.review.kept,'walk_found_new');assert.ok(done.changes.items.some(i=>i.kind==='screen'&&/Soldout/.test(i.text)));
+ assert.ok(!names(await r.store.recorded()).includes('Soldout'),'still only a draft');
+ // Discarded by mistake: the draft is archived, and a person brings it back.
+ await r.decideReview({runId:walk.id,decision:'discard'});assert.ok((await readdir(join(r.store.dir,'drafts','archive'))).includes(`${walk.id}.json`));
+ const back=await r.decideReview({runId:walk.id,decision:'restore'});assert.equal(back.review.status,'pending');
+ await r.decideReview({runId:walk.id,decision:'approve'});assert.ok(names(await r.store.recorded()).includes('Soldout'));
+ // The copy a mission took at its start is gone (an error, a cleanup): the mission is still compared, against the recorded map.
+ world.soldOut=false;world.banner=true;const run=await r.start({target:'app',mode:'record',objective:'Banner'});await click(r,run,'list');await r.store.save(`drafts/${run.id}.base.json`,null);const {rm}=await import('node:fs/promises');await rm(join(r.store.dir,'drafts',`${run.id}.base.json`));
+ const kept=await r.finish(run.id);assert.equal(kept.review.status,'pending');assert.equal(kept.review.baseMissing,true);await r.close();});
