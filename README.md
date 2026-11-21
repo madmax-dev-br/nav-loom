@@ -6,6 +6,8 @@ O agente decide o que explorar. O serviço local executa as ações permitidas, 
 
 ## Como funciona
 
+> Documentação completa (captura, reconhecimento de telas, grafo, `goto`, pontos de entrada, APIs, preservação dos fluxos, ferramentas MCP e boas práticas): [docs/como-funciona.md](docs/como-funciona.md).
+
 1. **Configure um projeto:** plataforma, endereço ou pacote Android, repositórios, perfil, permissões, reset e orçamento.
 2. **Conecte o agente:** ele consulta a memória do projeto e verifica as capacidades disponíveis.
 3. **Explore:** o executor identifica elementos pelo DOM/acessibilidade na Web ou pela hierarquia acessível do Android. Cada interação registra o contexto, as capturas antes/depois, o que mudou (texto, elementos, região da imagem), as chamadas de API disparadas e um resumo determinístico do efeito. `navloom_explore` percorre os candidatos pendentes em ordem estável e limitada; o agente decide formulários e caminhos de negócio.
