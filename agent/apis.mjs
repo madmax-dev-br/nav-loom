@@ -1,5 +1,6 @@
 import {mergeApis} from './network.mjs';
 import {isLoadCall} from '../lib/api-role.mjs';
+import {recordResponses} from './outcomes.mjs';
 /**
  * Which step an API call belongs to, and how to fix it when that was wrong.
  *
@@ -32,7 +33,7 @@ export function reattribute(graph,runs){
   for(const {call,from} of calls){const owner=ruled(graph,run,call,from)??from;if(owner!==from)moved++;owner.network.push(call);}
   for(const step of run.steps){if(!step.network.length)delete step.network;if(!step.transitionId)continue;const list=rebuilt.get(step.transitionId)??[];rebuilt.set(step.transitionId,[...list,...(step.network??[])]);}
  }
- for(const edge of graph.transitions)if(rebuilt.has(edge.id))edge.apis=mergeApis([],rebuilt.get(edge.id));
+ for(const edge of graph.transitions)if(rebuilt.has(edge.id)){edge.apis=mergeApis([],rebuilt.get(edge.id));delete edge.responses;recordResponses(edge,rebuilt.get(edge.id));}
  return {moved,transitions:rebuilt.size};
 }
 /**

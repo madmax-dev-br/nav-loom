@@ -34,7 +34,11 @@ export function reviewChanges(base,current,run){
   if(!known){const action=JSON.stringify(edge.action),same=b=>b.from===edge.from&&b.target===edge.target&&JSON.stringify(b.action)===action,here=b=>b.profile===edge.profile&&envOf(b)===envOf(edge);
    const rival=base.transitions.find(b=>same(b)&&here(b)&&b.to!==edge.to);
    // Landing on the same screen in another state is reported by the state itself; only another screen contradicts the recorded destination.
-   if(rival&&screenOf(rival.to)!==to){items.push({type:'different',kind:'destination',...where,expectedScreen:screenOf(rival.to),expectedTransitionId:rival.id,text:`“${edge.name}” em ${at(edge.from)} levou a ${at(edge.to)}; o gravado leva a ${name(screenOf(rival.to))}`});continue;}
+   if(rival&&screenOf(rival.to)!==to){
+    // The backend answered something the recorded way never got: a new answer explains the new destination. That is a variant to review, not the app breaking.
+    const keys=e=>new Set((e.responses??[]).map(r=>r.key)),mine=[...keys(edge)].filter(k=>!keys(rival).has(k)),theirs=[...keys(rival)].filter(k=>!keys(edge).has(k));
+    if(mine.length){items.push({type:'variant',kind:'response',...where,expectedScreen:screenOf(rival.to),expectedTransitionId:rival.id,responses:mine,text:`Varia pela resposta: “${edge.name}” em ${at(edge.from)} levou a ${at(edge.to)} com ${mine.join(', ')}; o gravado leva a ${name(screenOf(rival.to))}${theirs.length?` com ${theirs.join(', ')}`:''}`});continue;}
+    items.push({type:'different',kind:'destination',...where,expectedScreen:screenOf(rival.to),expectedTransitionId:rival.id,text:`“${edge.name}” em ${at(edge.from)} levou a ${at(edge.to)}; o gravado leva a ${name(screenOf(rival.to))}`});continue;}
    // Recorded for another account or environment. Going to the same screen is just that way confirmed here (kept without asking);
    // going elsewhere is how this account or environment differs, which is not a regression.
    const elsewhere=base.transitions.filter(b=>same(b)&&!here(b));

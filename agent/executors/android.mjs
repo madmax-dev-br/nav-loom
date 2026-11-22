@@ -121,11 +121,15 @@ export class AndroidExecutor{
   try{const output=await this.adb(['shell',`pid=$(pidof ${this.target.package} | cut -d" " -f1); [ -n "$pid" ] && logcat -d -v epoch --pid=$pid -t 2000`]);
    const stamped=output.split('\n').map(line=>({line,time:Number(line.trim().split(/\s+/)[0])})).filter(e=>Number.isFinite(e.time)&&e.time>0),fresh=stamped.filter(e=>e.time>this.networkCursor);if(stamped.length)this.networkCursor=Math.max(this.networkCursor,...stamped.map(e=>e.time));
    // Each call keeps the time its line was written (device clock moved to this machine's), not the time it was read.
-   for(const {line,time} of fresh){const at=Math.round(time*1000+(this.clockOffset??0)),entry=parseHttpLog(line);if(entry){if(entry.phase==='request')this.log.begin({method:entry.method,url:entry.url,source:'logcat',at});else this.log.complete({url:entry.url,status:entry.status,ms:entry.ms,source:'logcat',at});continue;}
+   for(const {line,time} of fresh){const at=Math.round(time*1000+(this.clockOffset??0)),entry=parseHttpLog(line);
+    // Every line of the app is kept a while with its time, so each step can keep the lines written while it happened.
+    (this.recent??=[]).push({at,line:line.trim().replace(/^\d+\.\d+\s+\d+\s+\d+\s+/,'')});if(this.recent.length>4000)this.recent.splice(0,this.recent.length-4000);if(entry){if(entry.phase==='request')this.log.begin({method:entry.method,url:entry.url,source:'logcat',at});else this.log.complete({url:entry.url,status:entry.status,ms:entry.ms,source:'logcat',at});continue;}
     const learned=this.harness?.apply('logcat',{line:line.trim()})?.value??parseAndroidNetwork([line]).map(c=>({method:c.method,url:c.url??c.path,status:c.status??undefined,ms:c.durationMs??undefined}))[0];if(!learned)continue;
     if(learned.status===undefined)this.log.begin({method:learned.method,url:learned.url,source:'logcat',at});else this.log.complete({method:learned.method,url:learned.url,status:learned.status,ms:learned.ms,source:'logcat',at});}
   }catch{}
  }
+ /** App log lines written between two moments of this machine's clock (ms). */
+ linesBetween(from,to){return (this.recent??[]).filter(l=>l.at>=from&&l.at<to);}
  async network({quick=false}={}){if(!quick)await this.pollLogcat();return this.log.drain();}
  /** Recent log lines of the application process, for the agent to learn the app's logging patterns from. */
  async logLines({contains,limit=40}={}){const pid=(await this.adb(['shell','pidof',this.target.package])).trim().split(' ')[0];if(!/^\d+$/.test(pid))return [];const output=await this.adb(['logcat','-d','-v','brief',`--pid=${pid}`,'-t','600']);return output.split('\n').map(l=>l.trim()).filter(l=>l&&!l.startsWith('-----')&&(!contains||l.toLowerCase().includes(contains.toLowerCase()))).slice(-limit).map(l=>l.length>300?l.slice(0,299)+'…':l);}

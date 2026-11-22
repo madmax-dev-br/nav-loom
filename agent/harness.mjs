@@ -11,9 +11,10 @@ const label=z.string().min(1).max(80);
 export const KINDS={
  logcat:{title:'Requests em linhas de log',purpose:'Reconhece chamadas de API em linhas do logcat do app.',input:'{line} — one logcat line of the application process',output:'null, or {url, method?, status?, ms?}. With status the call is recorded as completed, without it as started.',schema:z.object({url:z.string().min(1).max(2000),method:z.enum(['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS']).optional(),status:z.number().int().min(0).max(599).optional(),ms:z.number().min(0).max(600000).optional()}).strict().nullable()},
  screen:{title:'Identidade de tela',purpose:'Dá o mesmo identificador à mesma tela, mesmo quando o texto muda.',input:'{platform, route, heading, texts[], ids[], section} — title, texts and resource ids visible on the screen, selected tab or null',output:'null, or {screen, state?, name?}. Only used when the app does not declare its own screen id.',schema:z.object({screen:key,state:key.optional(),name:label.optional()}).strict().nullable()},
+ capture:{title:'Informação da tela',purpose:'Extrai de cada captura o que você quer ver em cada tela salva: campos e etiquetas mostrados no menu da tela e guardados no estado.',input:'{platform, route, heading, texts[], ids[], section, screen{id,name}, state{id,name}, apis[{method,path,status,answer?}], logs[]} — the capture, the API calls and the app log lines of the step that led to it',output:'null, or {fields:{label: text|number|boolean}, tags?:[...]}. Every active capture script runs; each keeps its own result.',schema:z.object({fields:z.record(z.union([z.string().max(300),z.number(),z.boolean()])).refine(o=>Object.keys(o).length<=20,'At most 20 fields'),tags:z.array(z.string().max(40)).max(10).optional()}).strict().nullable()},
  path:{title:'Modelo de caminho de API',purpose:'Agrupa chamadas iguais trocando partes variáveis do caminho.',input:'{method, host, path}',output:'null, or the path template, e.g. "/api/products/{id}"',schema:z.string().regex(/^\/[^\s?#]{0,300}$/).nullable()},
 };
-export const scriptSchema=z.object({id:key,kind:z.enum(['logcat','screen','path']),name:label,description:z.string().max(600).default(''),code:z.string().min(10).max(8000),samples:z.array(z.object({input:z.record(z.unknown()),expect:z.unknown()}).strict()).min(1).max(20)}).strict();
+export const scriptSchema=z.object({id:key,kind:z.enum(['logcat','screen','path','capture']),name:label,description:z.string().max(600).default(''),code:z.string().min(10).max(8000),samples:z.array(z.object({input:z.record(z.unknown()),expect:z.unknown()}).strict()).min(1).max(20)}).strict();
 const clip=(value,max)=>{const text=typeof value==='string'?value:JSON.stringify(value);return text.length>max?text.slice(0,max-1)+'…':text;};
 
 /**
@@ -56,6 +57,10 @@ export class Harness{
   await this.save();return script;
  }
  log(script,event,input,output){this.activity.push({time:now(),scriptId:script.id,kind:script.kind,event,...(input===null?{}:{input:clip(input,220)}),output:clip(output,220)});if(this.activity.length>300)this.activity.splice(0,this.activity.length-200);this.dirty=true;}
+ /** Run code against one input without saving it: what a person writing a script sees before proposing it. */
+ try(input,sample){const script=scriptSchema.pick({kind:true,code:true}).parse(input);try{const run=this.compile({...script,id:'try',revision:0});return {ok:true,value:run(sample??{})};}catch(e){return {ok:false,error:clip(e.message,300)};}}
+ /** Every active script of a kind, each with its own result (capture scripts all contribute). */
+ applyAll(kind,input){const out=[];for(const script of this.scripts){if(script.kind!==kind||script.status!=='active')continue;script.stats.runs++;try{const value=this.runner(script)(input);script.failures=0;if(value===null)continue;script.stats.matches++;script.stats.lastMatchAt=now();out.push({scriptId:script.id,value});}catch(e){script.stats.errors++;script.failures=(script.failures??0)+1;if(script.failures>=20){script.status='failed';this.log(script,'failed',null,'Desativado após erros repetidos: '+e.message);}}this.dirty=true;}return out;}
  /** First active script of the kind that recognises the input wins. A script that keeps failing is switched off. */
  apply(kind,input){
   for(const script of this.scripts){

@@ -9,6 +9,7 @@ import {mergeScreens,mergeStates} from './merge.mjs';
 import {screenScript} from './learn.mjs';
 import {entryPoints} from './flowgraph.mjs';
 import {ownerStep,ruled,reattribute} from './apis.mjs';
+import {answerOf,recordResponses} from './outcomes.mjs';
 import {decisionGraph,describeDecisions} from './navigate.mjs';
 import {reviewChanges,mergeDraft,carryOver,normalizeMode} from './review.mjs';
 import {observationDiff,imageDiff,classifyOutcome,summarizeTransition} from './diff.mjs';
@@ -57,7 +58,7 @@ export class Runtime{
  await this.store.saveRun(run);if(missing.length)return run;
  // Before the draft opens: profiles derived from the recorded evidence are not something the mission found.
  await this.bootstrapProfiles();await this.openDraft(run,config);await this.store.saveRun(run);
- this.interruptRequested=false;this.executor=executor;this.active=run.id;try{await executor.start();run.version=await this.version(config,target,executor);const links=await executor.deeplinks?.(),declared=Array.isArray(links)?links:links?.patterns??[];const entry=await this.captureRun(run);await this.settleNetwork(run,{quick:false});entry.network=run.entryNetwork??[];{const graph=await this.store.graph();
+ this.interruptRequested=false;this.executor=executor;this.active=run.id;try{await executor.start();run.version=await this.version(config,target,executor);const links=await executor.deeplinks?.(),declared=Array.isArray(links)?links:links?.patterns??[];const entry=await this.captureRun(run);await this.settleNetwork(run,{quick:false});entry.network=run.entryNetwork??[];{const graph=await this.store.graph();this.runCaptures(graph,entry,{calls:entry.network});
   // Where missions found the app when they began: the likely entry until a cold start (goto) confirms it in `entries`.
   graph.starts??={};const opened=(graph.starts[entryKey(run)]??={});opened[entry.stateId]=(opened[entry.stateId]??0)+1;await this.store.saveGraph(graph);
   graph.declaredDeeplinks??={};if(JSON.stringify(graph.declaredDeeplinks[run.target]??[])!==JSON.stringify(declared)){graph.declaredDeeplinks[run.target]=declared;await this.store.saveGraph(graph);}}if(mission.requiredCapabilities.includes('hierarchy')&&run.observations.at(-1).hierarchy==='unavailable')throw Error('Required hierarchy capability is unavailable');await this.store.saveRun(run);return run;}catch(e){run.status='blocked';run.stopReason=e.message;await this.store.saveRun(run);await executor.close().catch(()=>{});this.active=null;this.executor=null;return run;}
@@ -88,10 +89,28 @@ export class Runtime{
  /** Calls since the previous drain. Executors either keep a call log (`network`) or hand over raw calls (`drainNetwork`). */
  async drain(options){try{let data={calls:[],late:[]};if(typeof this.executor?.network==='function')data=await this.executor.network(options);else if(this.executor?.drainNetwork)data={calls:(await this.executor.drainNetwork()).slice(0,200).map(raw=>{const call=normalizeCall(raw);return {id:uid(),method:call.method,host:call.host??'',path:normalizePath(call.path),status:call.status,ms:call.durationMs};}),late:[]};for(const call of [...data.calls,...data.late]){const template=this.harness.apply('path',{method:call.method,host:call.host,path:call.path});if(template)call.path=template.value;}await this.keepExchanges([...data.calls,...data.late]);await this.harness.flush();return data;}catch{return {calls:[],late:[]};}}
  /** The full exchange of a call (headers, bodies) goes to its own evidence file; the step only keeps a pointer to it. */
- async keepExchanges(calls){const config=await this.store.config().catch(()=>null),secrets=[...Object.values(config?.profiles??{}).flatMap(profile=>Object.values(profile.secrets??{})).map(env=>process.env[env]),...Object.values(await this.help.secrets().catch(()=>({})))].filter(Boolean);for(const call of calls){if(!call.detail||typeof call.detail==='string')continue;const path=`evidence/net-${uid()}.json`;await this.store.immutable(path,redact(JSON.stringify({...call.detail,pathTemplate:call.path},null,2),secrets));call.detail=path;}}
- async logs({runId,contains,limit}){await this.live(runId);if(!this.executor.logLines)throw Error('Log lines are not available on this platform');return {lines:await this.executor.logLines({contains,limit})};}
+ async keepExchanges(calls){const config=await this.store.config().catch(()=>null),secrets=[...Object.values(config?.profiles??{}).flatMap(profile=>Object.values(profile.secrets??{})).map(env=>process.env[env]),...Object.values(await this.help.secrets().catch(()=>({})))].filter(Boolean);for(const call of calls){if(!call.detail||typeof call.detail==='string')continue;/* What the answer said that decides the next screen, kept beside the call (never the body). */call.answer=answerOf(call.detail.responseBody);if(!call.answer)delete call.answer;const path=`evidence/net-${uid()}.json`;await this.store.immutable(path,redact(JSON.stringify({...call.detail,pathTemplate:call.path},null,2),secrets));call.detail=path;}}
+ /**
+  * Keep the app's log lines written during each step: from the action to the next action (by the lines' own time),
+  * so they stay readable after the mission ends. The previous step's file grows with lines read late. Secrets are masked.
+  * Returns the current step's lines.
+  */
+ async keepStepLogs(run){if(!this.executor?.linesBetween)return [];const secrets=await this.secretValues(run).catch(()=>[]);let current=[];
+  for(const step of run.steps.slice(-2)){if(!Number.isFinite(step.actedAt))continue;const next=run.steps[run.steps.indexOf(step)+1],from=step.actedAt-300,to=Number.isFinite(next?.actedAt)?next.actedAt-300:Date.now()+1;
+   const lines=this.executor.linesBetween(from,to).slice(-400).map(l=>({at:l.at,line:redact(l.line,secrets)}));if(step===run.steps.at(-1))current=lines;if(!lines.length&&!step.log)continue;
+   step.log=`evidence/log-${step.id}.json`;await this.store.save(step.log,{stepId:step.id,from,to,lines});}
+  return current;}
+ /** Learned `capture` scripts: what each one makes of a screen (fields, tags), saved on the state and the capture for the interface to show. */
+ runCaptures(graph,observation,{calls=[],lines=[]}={}){const state=graph.states.find(s=>s.id===observation.stateId),screen=graph.screens.find(s=>s.id===observation.screenId);if(!state)return;
+  const hits=this.harness.applyAll('capture',{...screenInput(observation),screen:{id:screen?.id,name:screen?.name},state:{id:state.id,name:state.name},apis:calls.map(c=>({method:c.method,path:c.path,status:c.status,...(c.answer?{answer:c.answer}:{})})),logs:lines.slice(-200).map(l=>l.line)});
+  if(!hits.length)return;observation.info={};state.info??={};for(const hit of hits){const entry={...hit.value,at:now(),observationId:observation.id};state.info[hit.scriptId]=entry;observation.info[hit.scriptId]=entry;}}
+ async logs({runId,step,contains,limit=40}){
+  // A step of any run, from what was kept while it happened; the mission need not be running.
+  if(step!==undefined){const run=await this.store.run(runId),s=run.steps[step];if(!s)throw Error(`Run has ${run.steps.length} steps (0-${run.steps.length-1})`);const kept=s.log?await this.store.json(s.log,null):null;const lines=(kept?.lines??[]).filter(l=>!contains||l.line.toLowerCase().includes(contains.toLowerCase()));
+   return {step,action:s.action?.type,...(kept?{from:new Date(kept.from).toISOString(),to:new Date(kept.to).toISOString()}:{note:'No lines were kept for this step (no log source, or a run recorded before step logs existed).'}),lines:lines.slice(-limit).map(l=>`${new Date(l.at).toISOString().slice(11,23)} ${l.line.length>300?l.line.slice(0,299)+'…':l.line}`)};}
+  await this.live(runId);if(!this.executor.logLines)throw Error('Log lines are not available on this platform');return {lines:await this.executor.logLines({contains,limit})};}
  /** Fill in results of calls that were still in flight when their step was saved. */
- async applyLate(run,late){if(!late.length)return;const touched=new Map();for(const step of run.steps.slice(-6))for(const call of step.network??[]){const done=late.find(l=>l.id===call.id);if(done){Object.assign(call,done);if(step.transitionId)touched.set(step.transitionId,[...(touched.get(step.transitionId)??[]),done]);}}if(!touched.size)return;const graph=await this.store.graph();for(const [edgeId,calls] of touched){const edge=graph.transitions.find(e=>e.id===edgeId);if(edge)edge.apis=mergeApis(edge.apis,calls,{count:false});}await this.store.saveGraph(graph);}
+ async applyLate(run,late){if(!late.length)return;const touched=new Map();for(const step of run.steps.slice(-6))for(const call of step.network??[]){const done=late.find(l=>l.id===call.id);if(done){Object.assign(call,done);if(step.transitionId)touched.set(step.transitionId,[...(touched.get(step.transitionId)??[]),done]);}}if(!touched.size)return;const graph=await this.store.graph();for(const [edgeId,calls] of touched){const edge=graph.transitions.find(e=>e.id===edgeId);if(edge){edge.apis=mergeApis(edge.apis,calls,{count:false});recordResponses(edge,calls);}}await this.store.saveGraph(graph);}
  /** Calls seen between actions were caused by the previous action (lazy loading, redirects), or by startup. */
  async settleNetwork(run,options={quick:true}){const {calls,late}=await this.drain(options);await this.applyLate(run,late);if(calls.length)await this.placeCalls(run,calls);}
  /**
@@ -103,7 +122,7 @@ export class Runtime{
  async placeCalls(run,calls,{current}={}){
   const graph=await this.store.graph(),mine=[],byStep=new Map();
   for(const call of calls){let owner=ownerStep(run,call);owner=ruled(graph,run,call,owner);if(owner===undefined){run.entryNetwork=[...(run.entryNetwork??[]),call].slice(-40);continue;}if(owner===current){mine.push(call);continue;}byStep.set(owner,[...(byStep.get(owner)??[]),call]);}
-  let changed=false;for(const [step,list] of byStep){step.network=[...(step.network??[]),...list].slice(-40);const edge=step.transitionId&&graph.transitions.find(e=>e.id===step.transitionId);if(edge){edge.apis=mergeApis(edge.apis,list);changed=true;}}
+  let changed=false;for(const [step,list] of byStep){step.network=[...(step.network??[]),...list].slice(-40);const edge=step.transitionId&&graph.transitions.find(e=>e.id===step.transitionId);if(edge){edge.apis=mergeApis(edge.apis,list);recordResponses(edge,list);changed=true;}}
   if(changed)await this.store.saveGraph(graph);return mine;}
  /** What an action changed: structural diff, pixel region, the calls it triggered and a deterministic summary. */
  async effects(graph,before,after,action,element,beforeImage,calls){
@@ -129,9 +148,9 @@ export class Runtime{
  await this.settleNetwork(run);
  const step={id:uid(),startedAt:now(),actedAt:Date.now(),action:persisted,before:before.id,status:'running',expectedState:expectedState??null};run.steps.push(step);if(replay)run.metrics.replayedSteps++;else run.metrics.agentCalls++;await this.store.saveRun(run);
  const beforeImage=this.lastDecoded??this.lastImage;
- try{await this.executor.act(action,element);const after=await this.captureRun(run,{scrolledFrom:action.type==='scroll'?before:undefined,action:persisted,element});const network=await this.drain();await this.applyLate(run,network.late);network.calls=await this.placeCalls(run,network.calls,{current:step});if(network.calls.length)step.network=network.calls.slice(0,40);step.after=after.id;step.status=expectedState&&after.stateId!==expectedState?'diverged':'completed';step.finishedAt=now();const graph=await this.store.graph();
+ try{await this.executor.act(action,element);const after=await this.captureRun(run,{scrolledFrom:action.type==='scroll'?before:undefined,action:persisted,element});const network=await this.drain();await this.applyLate(run,network.late);network.calls=await this.placeCalls(run,network.calls,{current:step});if(network.calls.length)step.network=network.calls.slice(0,40);const lines=await this.keepStepLogs(run);step.after=after.id;step.status=expectedState&&after.stateId!==expectedState?'diverged':'completed';step.finishedAt=now();const graph=await this.store.graph();
   const effects=await this.effects(graph,before,after,persisted,element,beforeImage,network.calls);Object.assign(step,{outcome:effects.outcome,diff:effects.diff,imageChange:effects.imageChange,summary:effects.summary});
-  const edge=confirmTransition(graph,before,after,persisted,step,run,effects);step.transitionId=edge.id;if(action.secretRef)this.help.recordUse(graph,action.secretRef,run.id);
+  const edge=confirmTransition(graph,before,after,persisted,step,run,effects);step.transitionId=edge.id;this.runCaptures(graph,after,{calls:network.calls,lines});if(action.secretRef)this.help.recordUse(graph,action.secretRef,run.id);
   await this.store.saveGraph(graph);await this.syncMap(graph);if(step.status==='diverged'&&!soft){run.status='paused';run.stopReason='replay_diverged';run.metrics.recoveryRequests++;}await this.store.saveRun(run);if(run.status==='paused'){await this.executor.close().catch(()=>{});this.executor=null;this.active=null;}const apiHint=await this.networkHint(run);return {step,observation:after,previous:before,status:step.status,outcome:effects.outcome,summary:effects.summary,transitionId:edge.id,...(apiHint?{apiHint}:{})};}
  catch(e){step.status='failed';step.error=redact(e.message,action.secretRef?[action.value]:[]);step.finishedAt=now();
   if(e.recoverable){
@@ -426,6 +445,8 @@ export class Runtime{
   const runs=await this.store.runs(),result=reattribute(graph,runs);for(const run of runs)await this.store.saveRun(run);
   await this.store.saveGraph(graph);await this.syncMap(graph);
   return {endpoint:key,...(target?{belongsTo:`${role==='load'?'ao chegar em':'ação de'} ${target.name}${via?` ("${via}")`:''}`}:{rule:'removed'}),moved:result.moved,transitions:result.transitions};}
+ /** The documentation shipped with Navloom, shown in the interface. */
+ async docs(){return {markdown:await readFile(fileURLToPath(new URL('../docs/como-funciona.md',import.meta.url)),'utf8')};}
  async close(){if(this.active)await this.pause(this.active,'service_stopped');await this.previews;}
  async flushPreviews(){await this.previews;}
 }
@@ -448,7 +469,9 @@ function diagnose(graph,observation,wanted,surprises,run,status,reason){
  const settled=id=>{const st=graph.states.find(x=>x.id===id);return st&&!st.semantic?.includes('loading');};
  const branches=new Map();for(const t of graph.transitions){if(!t.confirmed||t.target!==run.target||t.action.type==='back'||!settled(t.to))continue;const key=t.from+JSON.stringify(t.action);(branches.get(key)??branches.set(key,{edge:t,to:new Set()}).get(key)).to.add(t.to);}
  const forks=[...branches.values()].filter(b=>b.to.size>1&&[observation?.stateId,...surprises.map(s=>graph.states.find(x=>x.id===s.expectedState)?.id)].some(id=>id&&graph.states.find(x=>x.id===b.edge.from)?.screenId===graph.states.find(x=>x.id===id)?.screenId));
- if(forks.length)out.branches=forks.slice(0,4).map(b=>`"${b.edge.name}" em ${name(graph.states.find(x=>x.id===b.edge.from)?.screenId)} já levou a ${[...b.to].map(id=>`${name(graph.states.find(x=>x.id===id)?.screenId)} (${stateName(id)})`).join(' ou ')}`);
+ // Each branch with the backend answer only it has seen, when there is one: that is the scenario to choose.
+ const why=(b,to)=>{const keys=e=>new Set((e.responses??[]).map(r=>r.key)),edges=graph.transitions.filter(t=>t.from===b.edge.from&&JSON.stringify(t.action)===JSON.stringify(b.edge.action)),mine=edges.filter(e=>e.to===to),own=[...new Set(mine.flatMap(e=>[...keys(e)]))].filter(k=>edges.every(o=>o.to===to||!keys(o).has(k)));return own.length?` com ${own.slice(0,2).join(', ')}`:'';};
+ if(forks.length)out.branches=forks.slice(0,4).map(b=>`"${b.edge.name}" em ${name(graph.states.find(x=>x.id===b.edge.from)?.screenId)} já levou a ${[...b.to].map(id=>`${name(graph.states.find(x=>x.id===id)?.screenId)} (${stateName(id)})${why(b,id)}`).join(' ou ')}`);
  return out;
 }
 /** What a `screen` script reads: the title, texts and ids on view, and the selected tab (the section of the app). */

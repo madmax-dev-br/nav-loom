@@ -250,3 +250,27 @@
 .map-edges g.is-variant .map-edge{stroke:var(--k-174860);stroke-dasharray:2 4;stroke-width:2}.agent-app .map-edge-label.is-variant,.agent-app .map-state-chip.is-variant{border-color:var(--k-174860);border-style:dotted;background:var(--k-e3f1f7);color:var(--k-174860)}
 .run-changes li.is-variant .run-change-type{background:var(--k-e3f1f7);color:var(--k-174860)}
 .help-account{display:grid;gap:6px;margin-top:10px}.help-account p{display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:var(--k-52636d)}.help-account input{font:inherit;padding:6px 8px}.help-account footer{display:flex;gap:8px}
+
+/* Documentation inside the app */
+.docs{display:grid;grid-template-columns:220px minmax(0,1fr);gap:32px;max-width:1180px;margin:0 auto;padding:28px 24px 64px}
+.docs-toc{position:sticky;top:16px;align-self:start;font-size:12.5px}.docs-toc ol{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}.docs-toc a{color:var(--k-6b7a84);text-decoration:none}.docs-toc a:hover{color:var(--k-1f2a30,inherit);text-decoration:underline}
+.docs-body{min-width:0;font-size:14px;line-height:1.7;max-width:84ch}.docs-body h1{font-size:26px;letter-spacing:-.5px;margin:0 0 16px}.docs-body h2{font-size:19px;margin:36px 0 10px;padding-top:12px;border-top:1px solid var(--k-e1e7e4);scroll-margin-top:16px}.docs-body h3{font-size:15px;margin:24px 0 8px}.docs-body h4{font-size:14px;margin:18px 0 6px}
+.docs-body p,.docs-body ul,.docs-body ol{margin:0 0 12px}.docs-body li{margin:3px 0}.docs-body code{font-size:12.5px;padding:1px 5px;border-radius:5px;background:var(--k-fbfcfc);border:1px solid var(--k-e1e7e4)}
+.docs-body blockquote{margin:0 0 12px;padding:8px 14px;border-left:3px solid var(--k-e1e7e4);color:var(--k-6b7a84)}
+.docs-code{overflow:auto;padding:12px 14px;border:1px solid var(--k-e1e7e4);border-radius:10px;background:var(--k-fbfcfc);font-size:12.5px;line-height:1.55;margin:0 0 14px}.docs-code code{border:0;padding:0;background:none}
+.docs-table{overflow-x:auto;margin:0 0 14px}.docs-table table{border-collapse:collapse;font-size:13px;width:100%}.docs-table th,.docs-table td{border:1px solid var(--k-e1e7e4);padding:6px 10px;text-align:left;vertical-align:top}.docs-table th{background:var(--k-fbfcfc);font-weight:600}
+@media (max-width:860px){.docs{grid-template-columns:1fr;padding:16px}.docs-toc{position:static}}
+
+/* Writing and editing scripts */
+.script-editor{display:grid;gap:10px;margin:12px 0}.script-editor label{display:grid;gap:4px;font-size:12px;color:var(--k-6b7a84)}.script-editor input,.script-editor select,.script-editor textarea{font:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--k-e1e7e4);border-radius:8px;background:var(--k-ffffff);color:inherit}
+.script-editor textarea{min-height:110px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.5}.script-editor .script-code{min-height:220px}
+.script-editor-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.script-editor-try{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:start}.script-editor-try>div{display:grid;gap:8px;padding-top:18px}
+.script-editor-try pre{margin:0;padding:8px 10px;border-radius:8px;border:1px solid var(--k-e1e7e4);font-size:12px;overflow:auto;max-height:220px}.script-editor-try pre.is-bad{border-color:var(--k-fbecec);background:var(--k-fbecec)}
+.script-editor footer{display:flex;gap:8px;flex-wrap:wrap}
+@media (max-width:860px){.script-editor-meta,.script-editor-try{grid-template-columns:1fr}}
+
+/* What capture scripts made of a screen */
+.screen-info{margin:12px 0;padding:10px 12px;border:1px solid var(--k-e1e7e4);border-radius:10px}.screen-info h3{display:flex;align-items:center;gap:6px;font-size:12px;margin:0 0 8px}
+.screen-info dl{display:grid;gap:4px;margin:4px 0 8px}.screen-info dl>div{display:flex;justify-content:space-between;gap:10px;font-size:12.5px}.screen-info dt{color:var(--k-6b7a84)}.screen-info dd{margin:0;text-align:right;overflow-wrap:anywhere}
+.screen-info-tags{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px}.screen-info-tags span{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--k-e1e7e4)}
+.script-editor-try>div>button{justify-self:start;display:inline-flex;flex-direction:row;align-items:center;gap:6px}

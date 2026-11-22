@@ -1,19 +1,20 @@
 # Navloom: como funciona, ferramentas e boas práticas
 
-Este documento explica o Navloom por dentro: o que ele captura, como reconhece telas, como monta o grafo, como navega sem gastar raciocínio do agente, como atribui chamadas de API, como nada do que uma missão encontra se perde, e o que fazer (e evitar) para tirar o melhor dele. O passo a passo de instalação e o modelo de `navloom.yaml` estão na skill do agente (`agent-skills/navloom/SKILL.md`). A referência técnica em inglês fica em `agent/README.md`.
+Este documento também está dentro do app, em **Como funciona**. Ele explica o Navloom por dentro: o que ele captura, como reconhece telas, como monta o grafo, como navega sem gastar raciocínio do agente, como atribui chamadas de API, como nada do que uma missão encontra se perde, e o que fazer (e evitar) para tirar o melhor dele. O passo a passo de instalação e o modelo de `navloom.yaml` estão na skill do agente (`agent-skills/navloom/SKILL.md`). A referência técnica em inglês fica em `agent/README.md`.
 
 ## 1. Visão geral
 
-```mermaid
-flowchart LR
-  A[Agente LLM<br/>Claude, Cursor…] -- MCP stdio --> B[scripts/agent-mcp.mjs]
-  B -- HTTP loopback + token --> C[Serviço local<br/>agent/runtime.mjs]
-  C --> D[Executor Android<br/>adb]
-  C --> E[Executor Web<br/>Playwright]
-  C --> F[Executor iOS<br/>simulador]
-  C --> G[(.navloom/<br/>grafo, execuções, evidências, rascunhos)]
-  C --> H[(navloom-map/<br/>mapa versionado)]
-  I[Interface /explore] -- leitura + decisões da pessoa --> C
+```
+Agente LLM (Claude, Cursor…)
+   │  MCP (stdio)
+   ▼
+scripts/agent-mcp.mjs ──HTTP local + token──▶ Serviço local (agent/runtime.mjs)
+                                                 ├─▶ Executor Android (adb)
+                                                 ├─▶ Executor Web (Playwright)
+                                                 ├─▶ Executor iOS (simulador)
+                                                 ├─▶ .navloom/  grafo, execuções, evidências, rascunhos, logs por passo
+                                                 └─▶ navloom-map/  mapa versionado
+Interface /explore ──leitura e decisões da pessoa──▶ Serviço local
 ```
 
 - **O agente decide, o Navloom executa e lembra.** O agente escolhe ações pelo MCP; o serviço age no app, captura cada tela, compara, grava evidências e mantém o grafo.
@@ -227,6 +228,20 @@ Fontes no Android, sem root nem certificado:
 
 Depois disso, um GET visto ao chegar em outra tela é **carregamento** dela; o resto é efeito da ação.
 
+**Variantes de resposta: N respostas, N estados.** A mesma ação pode levar a lugares diferentes conforme o que o backend respondeu (compra aprovada ou recusada, busca com ou sem resultado). Cada transição guarda as respostas vistas quando ela aconteceu, como chaves curtas: `POST /api/checkout 402 status=declined`.
+- A chave tem o endpoint, o status e os poucos valores do corpo que decidem o que vem depois (campos como `status`, `result`, `error`, `code`, e se uma lista veio vazia ou com itens).
+- Ids, datas e valores mascarados nunca entram na chave. O corpo completo continua só na evidência (`evidence/net-<id>.json`), com até três exemplos por chave.
+- Comparando as transições que saem do mesmo estado com a mesma ação, o Navloom sabe qual resposta leva aonde:
+  - `navloom_memory` lista isso em `responseVariants`;
+  - `navloom_screen` mostra em "Depende da resposta";
+  - o README do mapa traz a seção **Respostas que mudam o destino**;
+  - na interface, cada conexão mostra as respostas vistas nela.
+- Na validação, um destino novo explicado por uma resposta nova aparece como **Varia pela resposta**, não como regressão. Destino novo com a mesma resposta continua vermelho.
+- O diagnóstico do `goto` diz a resposta por trás de cada ramo, para o agente perguntar a você qual cenário quer.
+- As respostas completas são lidas pelo proxy (`network.reverse`). Pelo logcat só se sabe o status, a menos que um script `logcat` extraia mais.
+
+**Logs de cada interação.** Cada passo guarda as linhas de log do app escritas entre a sua ação e a próxima ação, pelo horário de cada linha (o mesmo relógio da atribuição de API). Ficam em `evidence/log-<passo>.json`, com segredos mascarados. As linhas lidas atrasadas entram no passo certo. `navloom_logs {runId, step: N}` devolve as linhas do passo N de qualquer execução, mesmo depois de ela terminar; sem `step`, as mais recentes do app em execução.
+
 **Corrigir depois.**
 - `navloom_memory` traz `apiDoubts`: um endpoint quase sempre num lugar e algumas vezes em outro ("GET /api/products: 5× ao chegar em Produtos, 1× ao chegar em Detalhe").
 - O agente confere e diz quem é o dono com `navloom_organize {apis:[{endpoint, screen, role: load|action, via?}]}` (ou `navloom_apis`, no nível estendido).
@@ -239,6 +254,21 @@ Depois disso, um GET visto ao chegar em outra tela é **carregamento** dela; o r
 | `logcat` | `{line}` | `{url, method?, status?, ms?}` |
 | `screen` | `{platform, route, heading, texts[], ids[], section}` | `{screen, state?, name?}` |
 | `path` | `{method, host, path}` | modelo como `/api/products/{id}` |
+| `capture` | a captura (título, textos, ids, aba), a tela e o estado, as chamadas de API do passo (com a resposta) e as linhas de log do passo | `{fields: {rótulo: valor}, tags?: [...]}` mostrado no menu da tela |
+
+**Seus próprios scripts.** No painel **Harness**, **Novo script** abre um editor:
+- escolha o tipo (cada um começa com um exemplo que funciona) e escreva `function run(input)`;
+- **Testar** roda o código numa entrada sem salvar;
+- **Salvar e ativar** grava uma revisão e roda os exemplos; o script só ativa se todos conferirem.
+
+**Editar** faz o mesmo com qualquer script existente, inclusive os que o agente propôs (vira uma revisão nova).
+
+**Scripts de informação da tela (`capture`)** são a forma de mostrar e guardar o que você quiser em cada tela salva:
+- todos os ativos rodam em cada captura, cada um com seu resultado;
+- o resultado fica no estado e na captura;
+- ele aparece em **Informações dos scripts**, no menu da tela no mapa, e vai para o `map.yaml`.
+
+Exemplos: o total do carrinho, um aviso quando alguma chamada respondeu 4xx/5xx, uma etiqueta "recusado" a partir da resposta do checkout, o id da sessão lido do log. Para algo além de campos e etiquetas (uma tela própria, outra forma de exibir ou chamar ferramentas), use os plugins do projeto (`.navloom/plugins`): componente isolado com os campos de cada tela e ferramentas em contêiner sem rede (ver `agent/README.md`, Project plugins).
 
 Nada que o agente escreve roda antes de uma pessoa aprovar no painel Harness. Na aprovação os exemplos rodam e o script só ativa se todos conferirem. O código roda isolado (contexto V8 à parte, só JSON, 25 ms por chamada).
 
@@ -279,7 +309,8 @@ Um checkout limpo carrega o mapa quando `.navloom/graph.json` não existe; os pe
 | `navloom_merge` | unir telas ou estados gravados duas vezes |
 | `navloom_organize` | nomes, descrições, fluxos e a dona de cada endpoint |
 | `navloom_ask`, `navloom_answer`, `navloom_help` | pedir e registrar ajuda |
-| `navloom_harness`, `navloom_harness_propose`, `navloom_logs` | scripts aprendidos (inclusive o de tela sugerido) |
+| `navloom_harness`, `navloom_harness_propose` | scripts aprendidos (inclusive o de tela sugerido) |
+| `navloom_logs` | linhas de log de um passo de qualquer execução (`step`) ou as mais recentes |
 | `navloom_evidence` | imagem ou JSON de uma captura, quando o texto não basta |
 | `navloom_status` | contadores e missão ativa |
 
@@ -332,4 +363,6 @@ Um checkout limpo carrega o mapa quando `.navloom/graph.json` não existe; os pe
 | "Another application is in front" | outro app tomou a frente no aparelho | liberar o aparelho; um emulador por projeto |
 | Capturas lentas, "Command failed" | aparelho ou computador sobrecarregado (o `adb` tem 15 s por captura) | ver a carga (`adb shell cat /proc/loadavg`); fechar o que estiver competindo |
 | `goto` parou com `app_error` | o app mostrou erro (login recusado, serviço fora do ar) | ler `appSays`; corrigir a condição ou perguntar à pessoa |
+| Não sei por que a mesma ação foi a dois lugares | respostas diferentes do backend | `responseVariants` em `navloom_memory`; respostas da conexão no mapa |
+| Quero ver o log do momento de um toque | | `navloom_logs {runId, step}` |
 | Um fluxo "sumiu" | missão descartada, ou rascunho perdido numa versão anterior | Execuções → Recuperar (`.navloom/drafts/archive/`) |

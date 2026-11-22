@@ -2,6 +2,7 @@ import {splitApis,screenApis} from '../lib/api-role.mjs';
 import {similarScreens} from './recognize.mjs';
 import {entryPoints,entryLines} from './flowgraph.mjs';
 import {apiDoubts} from './apis.mjs';
+import {branchLines} from './outcomes.mjs';
 /** Compact projections returned to external agents. The interface keeps reading the full records. */
 const short=id=>id?String(id).slice(0,8):id;
 const clip=(text,max)=>{const value=String(text??'').replace(/\s+/g,' ').trim();return value.length>max?value.slice(0,max-1)+'…':value;};
@@ -82,6 +83,8 @@ export function briefMemory(memory){
   ...(()=>{const lines=entryLines(entryPoints(graph));return lines.length?{entryPoints:lines}:{};})(),
   ...(graph.flows?.length?{flows:graph.flows.map(f=>({id:f.id,name:f.name,screens:f.screenIds.map(id=>graph.screens.find(s=>s.id===id)?.name)}))}:{}),
   ...duplicates(graph),
+  // Actions whose destination depends on what the backend answered: which answer leads where.
+  ...(()=>{const lines=branchLines(graph);return lines.length?{responseVariants:lines}:{};})(),
   // API calls that look placed on the wrong screen: usually in one place, a few times elsewhere.
   ...(()=>{const doubts=apiDoubts(graph);return doubts.length?{apiDoubts:doubts.map(d=>`${d.endpoint}: ${d.usualCount}× ${d.usual}, ${d.oddCount}× ${d.odd}`),apiDoubtsHint:'Misplaced? navloom_organize {apis:[{endpoint, screen, role}]} re-places it from evidence.'}:{};})(),
   ...(Object.keys(graph.declaredDeeplinks??{}).length?{declaredDeeplinks:Object.fromEntries(Object.entries(graph.declaredDeeplinks).map(([target,list])=>[target,list.map(d=>d.pattern+(d.match==='prefix'?'*':''))]))}:{}),

@@ -2,19 +2,24 @@
 import {Bot,Braces,Check,CircleDashed,Eye,FileCode2,GitBranch,Link2,MousePointerClick,Route,ScrollText,Sparkles,X} from 'lucide-react';
 import {apiText} from '@/components/agent-map';
 import {splitApis} from '@/lib/api-role.mjs';
+import {useState} from 'react';
+import {Pencil,Plus} from 'lucide-react';
+import {ScriptEditor} from '@/components/script-editor';
 
 type Obj=Record<string,any>;
 const KIND:Record<string,{label:string;help:string}>={
  logcat:{label:'Requests no log',help:'Reconhece chamadas de API nas linhas de log do app.'},
  screen:{label:'Identidade de tela',help:'Dá o mesmo identificador à mesma tela, mesmo quando o texto muda.'},
  path:{label:'Caminho de API',help:'Agrupa chamadas iguais trocando as partes variáveis do caminho.'},
+ capture:{label:'Informação da tela',help:'Extrai de cada captura os campos e etiquetas que aparecem no menu de cada tela salva.'},
 };
 const STATUS:Record<string,string>={proposed:'Aguardando aprovação',active:'Ativo',failed:'Exemplos falharam',disabled:'Desativado',rejected:'Rejeitado'};
 const EVENT:Record<string,string>={match:'reconheceu',proposed:'proposto',approved:'aprovado',failed:'falhou',disabled:'desativado',rejected:'rejeitado'};
 const show=(value:unknown)=>typeof value==='string'?value:JSON.stringify(value);
 
 /** What the harness knows and how it got there: the working loop, the project, its flows, learned scripts and their activity. */
-export function HarnessPanel({data,graph,busy,onReview}:{data?:Obj;graph:Obj;busy:boolean;onReview:(id:string,decision:string)=>void}){
+export function HarnessPanel({data,graph,busy,onReview,onPropose,onTry}:{data?:Obj;graph:Obj;busy:boolean;onReview:(id:string,decision:string)=>void;onPropose:(script:Obj,activate:boolean)=>Promise<void>;onTry:(kind:string,code:string,input:Obj)=>Promise<Obj>}){
+ const [editing,setEditing]=useState<Obj|null|undefined>(undefined);
  const config=data?.config,scripts:Obj[]=data?.harness?.scripts??[],activity:Obj[]=(data?.harness?.activity??[]).slice().reverse(),runs:Obj[]=data?.runs??[],active=runs.find(r=>r.id===data?.activeRun);
  const screenOf=(stateId:string)=>graph.screens.find((s:Obj)=>s.id===graph.states.find((x:Obj)=>x.id===stateId)?.screenId);
  const apis=new Set<string>(graph.transitions.flatMap((t:Obj)=>(t.apis??[]).map(apiText)));
@@ -63,12 +68,15 @@ export function HarnessPanel({data,graph,busy,onReview}:{data?:Obj;graph:Obj;bus
    :<p className="agent-quiet">Nenhuma rota direta usada ainda. Quando o agente pedir para ir a uma tela conhecida, o resultado aparece aqui.</p>}</section>
 
   <section className="harness-card"><div className="harness-card-title"><h3>Scripts aprendidos</h3><span>{activeScripts} ativos{waiting?` · ${waiting} aguardando você`:''} · {matches} reconhecimentos</span></div>
-   <p className="harness-note">O agente propõe; nada escrito por ele roda antes da sua aprovação. Ao aprovar, os exemplos são executados e o script só é ativado se todos conferirem.</p>
+   <p className="harness-note">O agente propõe; nada escrito por ele roda antes da sua aprovação. Ao aprovar, os exemplos são executados e o script só é ativado se todos conferirem. Você também pode escrever os seus ou editar qualquer um: um script de <b>informação da tela</b> roda em cada captura e mostra o que você quiser no menu de cada tela salva.</p>
+   <button className="agent-primary" disabled={busy} onClick={()=>setEditing(null)}><Plus size={13}/> Novo script</button>
+   {editing!==undefined&&<ScriptEditor key={editing?.id??'new'} initial={editing??undefined} busy={busy} onTry={onTry} onClose={()=>setEditing(undefined)} onSave={async(script,activate)=>{await onPropose(script,activate);setEditing(undefined);}}/>}
    {scripts.length?<div className="harness-scripts">{scripts.map(script=><article key={script.id} className={'harness-script is-'+script.status}>
      <header><FileCode2 size={16}/><div><h4>{script.name}</h4><small>{KIND[script.kind]?.label} · <code>{script.id}.js</code> · revisão {script.revision}</small></div><span className={'harness-status is-'+script.status}>{STATUS[script.status]??script.status}</span></header>
      <p>{script.description||KIND[script.kind]?.help}</p>
      <dl className="harness-stats"><div><dt>Execuções</dt><dd>{script.stats?.runs??0}</dd></div><div><dt>Reconhecimentos</dt><dd>{script.stats?.matches??0}</dd></div><div><dt>Erros</dt><dd>{script.stats?.errors??0}</dd></div></dl>
      <details><summary>Código</summary><pre>{script.code}</pre></details>
+     <button className="agent-subtle" disabled={busy} onClick={()=>setEditing(script)}><Pencil size={12}/> Editar</button>
      <details open={script.status!=='active'}><summary>{script.samples.length} {script.samples.length===1?'exemplo':'exemplos'}{script.results?` · ${script.results.filter((r:Obj)=>r.ok).length} conferem`:''}</summary><ul className="harness-samples">{script.samples.map((sample:Obj,i:number)=>{const result=script.results?.[i];return <li key={i} className={result?(result.ok?'is-ok':'is-bad'):''}>{result?(result.ok?<Check size={13}/>:<X size={13}/>):<CircleDashed size={13}/>}<code>{show(sample.input.line??sample.input)}</code><span>→ <code>{show(sample.expect??null)}</code></span>{result&&!result.ok&&<small>obtido: {show(result.error??result.got??null)}</small>}</li>;})}</ul></details>
      <footer>{['proposed','failed','disabled','rejected'].includes(script.status)&&<button className="agent-primary" disabled={busy} onClick={()=>onReview(script.id,'approve')}>{script.status==='proposed'?'Aprovar e testar':'Testar e ativar'}</button>}{script.status==='proposed'&&<button disabled={busy} onClick={()=>onReview(script.id,'reject')}>Rejeitar</button>}{script.status==='active'&&<button disabled={busy} onClick={()=>onReview(script.id,'disable')}>Desativar</button>}</footer>
     </article>)}</div>:<p className="agent-quiet">Nenhum script ainda. Quando o agente notar um padrão estável — por exemplo, o formato em que o app registra suas requisições no log — ele propõe um script aqui.</p>}</section>

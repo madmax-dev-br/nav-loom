@@ -20,6 +20,15 @@
         "dev"
       ],
       "port": 5173
+    },
+    {
+      "name": "navloom-agent-service-android-lab",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "scripts/agent-service.mjs",
+        "work/android-lab"
+      ],
+      "port": 4788
     }
   ]
 }

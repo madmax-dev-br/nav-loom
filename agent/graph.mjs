@@ -1,6 +1,7 @@
 import {hash,now,uid} from './store.mjs';
 import {mergeApis} from './network.mjs';
 import {envOf} from './schema.mjs';
+import {recordResponses} from './outcomes.mjs';
 import {tokensOf,controlsOf,semanticMarkers,structureKey,learn,recognizeScreen,recognizeState,stateName,activityOf} from './recognize.mjs';
 /** Which accounts (profiles) and environments have seen a screen or state. */
 const tag=(item,run)=>{for(const [key,value] of [['profiles',run.profile??'default'],['environments',run.environment??envOf(run)]]){item[key]??=[];if(!item[key].includes(value))item[key].push(value);}};
@@ -110,7 +111,7 @@ export function confirmTransition(graph,before,after,action,step,run,effects={})
  if(element)replay.elementIdentity=element.identity;
  const signature=hash([before.stateId,after.stateId,replay,run.target,run.profile,run.preconditions,run.version?.fingerprint,...(envOf(run)==='default'?[]:[envOf(run)])]);let edge=graph.transitions.find(e=>e.signature===signature);
  if(!edge){edge={id:uid(),signature,from:before.stateId,to:after.stateId,target:run.target,profile:run.profile,...(envOf(run)==='default'?{}:{environment:envOf(run)}),preconditions:run.preconditions,kind:action.type==='scroll'?'scroll':before.screenId===after.screenId?'state':'navigation',outcome:effects.outcome??null,name:element?.label||element?.name||(action.type==='deeplink'?action.url:action.type==='wait'?'Evento automático':action.type==='back'?'Voltar':action.type),action:replay,confirmed:true,evidence:[],version:run.version,cost:1,description:'',summary:effects.summary??'',diff:effects.diff??null,imageChange:effects.imageChange??null,apis:[]};graph.transitions.push(edge);}edge.evidence.push({runId:run.id,stepId:step.id,before:before.id,after:after.id,...(step.status==='diverged'?{diverged:true}:{})});if(edge.evidence.length>50)edge.evidence.splice(0,edge.evidence.length-50);
- if(calls.length)edge.apis=mergeApis(edge.apis,calls);
+ if(calls.length){edge.apis=mergeApis(edge.apis,calls);recordResponses(edge,calls);}
  if(!edge.summary&&effects.summary)edge.summary=effects.summary;if(!edge.diff&&effects.diff)edge.diff=effects.diff;if(!edge.imageChange&&effects.imageChange)edge.imageChange=effects.imageChange;if(!edge.outcome&&effects.outcome)edge.outcome=effects.outcome;
  // A deeplink that was opened and observed becomes a known entry of the screen it landed on.
  if(action.type==='deeplink'&&action.url){const screen=graph.screens.find(s=>s.id===after.screenId);if(screen){screen.deeplinks??=[];if(!screen.deeplinks.some(d=>d.url===action.url))screen.deeplinks.push({url:action.url,state:after.stateId,stepId:step.id});}
