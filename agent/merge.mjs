@@ -39,11 +39,16 @@ export function dedupeTransitions(graph){
  for(const d of graph.descriptions??[])if(d.kind==='transition'&&renamed[d.targetId])d.targetId=renamed[d.targetId];
  return renamed;
 }
-export function mergeScreens(graph,intoId,fromIds,{log=true}={}){
+/**
+ * `asState`: the folded screen was never a screen of its own, it is a state of `into` (a dialog, a step, a variant that was
+ * recorded apart). Its states keep their ids, evidence and transitions, take its name and are never joined to another state.
+ */
+export function mergeScreens(graph,intoId,fromIds,{log=true,asState=false}={}){
  const into=graph.screens.find(s=>s.id===intoId);if(!into)throw Error(`Unknown screen ${intoId}`);
  const folded=[];
  for(const id of unique(fromIds)){const screen=graph.screens.find(s=>s.id===id);if(!screen||id===intoId)continue;
   if(screen.target!==into.target)throw Error(`${screen.name} and ${into.name} belong to different targets`);
+  if(asState){const taken=new Set(graph.states.filter(s=>s.screenId===intoId).map(s=>s.name));for(const state of graph.states.filter(s=>s.screenId===id)){const base=state.name==='padrão'||!state.name?screen.name:`${screen.name} · ${state.name.replace(/^padrão · /,'')}`;let name=base;for(let k=2;taken.has(name);k++)name=`${base} ${k}`;taken.add(name);state.name=name;state.distinct=true;if(!state.description&&screen.description)state.description=screen.description;}}
   for(const state of graph.states)if(state.screenId===id)state.screenId=intoId;
   for(const flow of graph.flows??[])flow.screenIds=unique(flow.screenIds.map(x=>x===id?intoId:x));
   for(const d of graph.deeplinks??[])if(d.screenId===id)d.screenId=intoId;
@@ -60,10 +65,10 @@ export function mergeScreens(graph,intoId,fromIds,{log=true}={}){
   for(const s of graph.screens)if(s.similar)s.similar=s.similar.filter(c=>c.screenId!==id);
   folded.push({id,name:screen.name});}
  // The states the two had in common become one: same keyboard, same moment, about the same controls.
- const states=graph.states.filter(s=>s.screenId===intoId&&!s.scrollOf&&!s.stateKey),controls=s=>s.controls?new Set(s.controls):controlsOfHotspots(s.hotspots);
+ const states=asState?[]:graph.states.filter(s=>s.screenId===intoId&&!s.scrollOf&&!s.stateKey&&!s.distinct),controls=s=>s.controls?new Set(s.controls):controlsOfHotspots(s.hotspots);
  for(let i=0;i<states.length;i++)for(let j=i+1;j<states.length;j++){const a=states[i],b=states[j];if(!a||!b||!graph.states.includes(a)||!graph.states.includes(b))continue;if(!!a.keyboard!==!!b.keyboard||JSON.stringify(a.semantic??[])!==JSON.stringify(b.semantic??[]))continue;if(jaccard(controls(a),controls(b))>=.6){mergeStates(graph,a.id,[b.id],{log:false});states[j]=null;}}
- if(log&&folded.length)(graph.merges??=[]).push({id:uid(),kind:'screen',into:intoId,from:folded.map(f=>f.id),names:folded.map(f=>f.name),at:now()});
+ if(log&&folded.length)(graph.merges??=[]).push({id:uid(),kind:'screen',into:intoId,from:folded.map(f=>f.id),names:folded.map(f=>f.name),...(asState?{as:'state'}:{}),at:now()});
  return folded;
 }
 /** Bring merges logged in a draft (and not in its base) into another copy of the map. */
-export function replayMerges(graph,merges=[],{skipKnown=true}={}){for(const m of merges){if(skipKnown&&graph.merges?.some(x=>x.id===m.id))continue;try{if(m.kind==='screen'&&graph.screens.some(s=>s.id===m.into))mergeScreens(graph,m.into,m.from,{log:false});else if(m.kind==='state'&&graph.states.some(s=>s.id===m.into))mergeStates(graph,m.into,m.from,{log:false});}catch{}graph.merges??=[];if(!graph.merges.some(x=>x.id===m.id))graph.merges.push(m);}return graph;}
+export function replayMerges(graph,merges=[],{skipKnown=true}={}){for(const m of merges){if(skipKnown&&graph.merges?.some(x=>x.id===m.id))continue;try{if(m.kind==='screen'&&graph.screens.some(s=>s.id===m.into))mergeScreens(graph,m.into,m.from,{log:false,asState:m.as==='state'});else if(m.kind==='state'&&graph.states.some(s=>s.id===m.into))mergeStates(graph,m.into,m.from,{log:false});}catch{}graph.merges??=[];if(!graph.merges.some(x=>x.id===m.id))graph.merges.push(m);}return graph;}

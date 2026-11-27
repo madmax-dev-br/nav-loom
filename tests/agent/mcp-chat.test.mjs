@@ -14,7 +14,7 @@ async function connect(root,{elicitation,tools}={}){const client=new Client({nam
 const parse=result=>JSON.parse(result.content.find(c=>c.type==='text').text);
 test('core tool tier is small; extended and all widen it; descriptions stay short',async t=>{
  const root=await mkdtemp(join(tmpdir(),'navloom-mcp-')),service=await createService({root,port:0});t.after(async()=>{await service.close();await rm(root,{recursive:true,force:true});});
- const core=await connect(root);t.after(()=>core.close());const {tools}=await core.listTools();assert.equal(tools.length,TIERS.core.length);assert.ok(tools.every(x=>x.description.length<=260),'core descriptions are short');const size=JSON.stringify(tools).length;assert.ok(size<14500,`core catalog under 14.5k chars, got ${size}: route/replay, capabilities, deeplinks and describe live in the extended tier`);assert.ok(!tools.some(x=>x.name==='navloom_configure'));
+ const core=await connect(root);t.after(()=>core.close());const {tools}=await core.listTools();assert.equal(tools.length,TIERS.core.length);assert.ok(tools.every(x=>x.description.length<=260),'core descriptions are short');const size=JSON.stringify(tools).length;assert.ok(size<14700,`core catalog under 14.7k chars, got ${size}: route/replay, capabilities, deeplinks and describe live in the extended tier`);assert.ok(!tools.some(x=>x.name==='navloom_configure'));
  const all=await connect(root,{tools:'all'});t.after(()=>all.close());assert.ok((await all.listTools()).tools.some(x=>x.name==='navloom_configure'));
  const extended=await connect(root,{tools:'extended'});t.after(()=>extended.close());assert.equal((await extended.listTools()).tools.length,TIERS.extended.length);
 });

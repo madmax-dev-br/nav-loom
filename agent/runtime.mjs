@@ -3,7 +3,7 @@ import {readFile,realpath,stat,rm} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {Store,uid,now,hash,safePath,emptyGraph} from './store.mjs';
 import {actionSchema,missionSchema,defaultEnvironment,targetIn,envOf,envKey} from './schema.mjs';
-import {recordObservation,confirmTransition,planRoute,compareRuns,resolveScreen,placeScroll} from './graph.mjs';
+import {recordObservation,confirmTransition,planRoute,compareRuns,resolveScreen,resolveState,placeScroll} from './graph.mjs';
 import {structureKey,locate,tokensOf,learn,similarScreens,controlsOfHotspots,selectedTab} from './recognize.mjs';
 import {mergeScreens,mergeStates} from './merge.mjs';
 import {screenScript} from './learn.mjs';
@@ -31,6 +31,8 @@ import {command,gitVersion} from './process.mjs';
 const executors={web:WebExecutor,android:AndroidExecutor,ios:IosExecutor};
 /** Where the app opens differs per environment (a mock may skip the sign-in), so the entry screen is kept per target and environment. */
 export const entryKey=item=>envOf(item)==='default'?item.target:`${item.target}@${envOf(item)}`;
+/** The screen an operation shows: the one named, or the one of the state named alone. */
+const shownScreen=(graph,ref,stateRef)=>ref?resolveScreen(graph,ref):graph.screens.find(s=>s.id===resolveState(graph,stateRef).screenId);
 export class Runtime{
  constructor(root,{executorFactory}={}){this.store=new Store(root);this.harness=new Harness(this.store);this.help=new Help(this.store);const create=executorFactory??(target=>new executors[target.platform](target));/* Every executor consults the scripts learned for this project. */this.factory=target=>Object.assign(create(target),{harness:this.harness});this.executor=null;this.active=null;this.tail=Promise.resolve();this.mapError=null;this.draftRun=null;this.store.draftId=()=>this.active&&this.draftRun===this.active?this.active:null;
   this.store.graphFallback=async()=>{const config=await this.store.config();return config.map.enabled?importMap(join(this.store.root,config.map.dir)):null;};}
@@ -40,7 +42,7 @@ export class Runtime{
  /** Compact by default; 'full' returns the complete records. */
  async view(detail,full,lean){return detail==='full'?full:lean();}
  /** One screen in depth, as text: state digests, transitions in and out, deeplinks, code links and remembered help. */
- async screenDetail({screen:ref}){const graph=await this.store.graph();return leanScreen(graph,resolveScreen(graph,ref).id);}
+ async screenDetail({screen:ref,state:stateRef}){const graph=await this.store.graph(),screen=shownScreen(graph,ref,stateRef);return {...leanScreen(graph,screen.id),...(stateRef?{shownState:resolveState(graph,stateRef,screen.id).id}:{})};}
  async transition({id,detail='compact'}){const graph=await this.store.graph();const t=graph.transitions.find(x=>x.id===id);if(!t)throw Error('Transition not found');return detail==='full'?t:{...leanTransition(t,graph),diff:t.diff?{textAdded:t.diff.textAdded,textRemoved:t.diff.textRemoved,elementsAdded:t.diff.elementsAdded,elementsRemoved:t.diff.elementsRemoved,markersAdded:t.diff.markersAdded}:null,region:t.imageChange?.region??null,replay:t.action};}
  /** Screenshots go to the model downscaled and compressed; the full PNG stays on disk. */
  async evidence({path,maxWidth,quality=60,format='jpeg'}){const data=await this.store.resource(path);if(path.endsWith('.json'))return {text:data.toString('utf8')};if(path.endsWith('.jpg')&&format==='jpeg'&&!maxWidth)return {mimeType:'image/jpeg',data:data.toString('base64')};const config=await this.store.config();const width=maxWidth??config.captures.modelWidth;if(path.endsWith('.jpg'))return {mimeType:'image/jpeg',data:data.toString('base64'),note:'Preview already compressed; request the .png path with maxWidth for a different size'};const image=scalePng(decodePng(data),width);if(format==='png'){const {encodePng}=await import('./png.mjs');return {mimeType:'image/png',data:encodePng(image).toString('base64')};}return {mimeType:'image/jpeg',data:encodeJpeg(image,quality).toString('base64'),width:image.width,height:image.height};}
@@ -67,13 +69,21 @@ export class Runtime{
  /** Profile secrets come from environment variables; answers to help requests from the ignored local secret store. */
  async secretValues(run){const config=await this.store.config();const local=await this.help.secrets();return [...Object.values(config.profiles[run.profile]?.secrets??{}).map(env=>process.env[env]),...Object.values(local)].filter(Boolean);}
  async resolveSecret(config,run,secretRef){const env=config.profiles[run.profile].secrets[secretRef];if(env&&process.env[env]!==undefined)return process.env[env];const local=await this.help.secrets();if(local[secretRef]!==undefined)return local[secretRef];throw Error(env?`Environment variable ${env} for secret ${secretRef} is not set`:`Secret ${secretRef} is not configured in the profile nor answered as a help request`);}
+ /**
+  * What the device says (elements, whether the keyboard is up) and what it shows (the screenshot) are two round trips. A keyboard
+  * that opens or closes between them would put the picture of one state on the capture of another, so the keyboard is asked
+  * about again after the screenshot and both are taken again until they agree.
+  */
+ async sight(){let observation=await this.look(),image=await this.executor.capture();
+  if(typeof this.executor.keyboardShown==='function')for(let attempt=0;attempt<3;attempt++){const shown=await this.executor.keyboardShown().catch(()=>null);if(typeof shown!=='boolean'||shown===!!observation.keyboard)break;observation=await this.look();image=await this.executor.capture();}
+  return {observation,image};}
  async captureRun(run,{scrolledFrom,action,element}={}){
- const observation=await this.look();observation.id=uid();observation.runId=run.id;observation.version=run.version;
+ const {observation,image}=await this.sight();observation.id=uid();observation.runId=run.id;observation.version=run.version;
  const graph=await this.store.graph(),previous=run.observations.at(-1);placeScroll(graph,observation,run.target,scrolledFrom,previous);
  // What the navigation says about where this capture is: where the action started, where the same action led before, the way here.
  const expected=action&&previous?graph.transitions.filter(t=>t.from===previous.stateId&&t.action.type===action.type&&(t.action.elementIdentity??null)===(element?.identity??null)&&(t.action.url??null)===(action.url??null)).map(t=>graph.states.find(s=>s.id===t.to)?.screenId).filter(Boolean):[];
  const trail=run.observations.slice(-12).map(o=>o.screenId);
- recordObservation(graph,observation,run,{previous,action,element,expected,trail});observation.trail=[...trail.filter((id,i)=>id!==trail[i-1]).slice(-5),observation.screenId].filter((id,i,all)=>id!==all[i-1]);observation.help=this.help.help(graph,observation,await this.profileSecrets(run.profile));observation.digest=digest(observation);const image=await this.executor.capture();observation.screenshot=`evidence/${observation.id}.png`;this.lastImage=image;
+ recordObservation(graph,observation,run,{previous,action,element,expected,trail});observation.trail=[...trail.filter((id,i)=>id!==trail[i-1]).slice(-5),observation.screenId].filter((id,i,all)=>id!==all[i-1]);observation.help=this.help.help(graph,observation,await this.profileSecrets(run.profile));observation.digest=digest(observation);observation.screenshot=`evidence/${observation.id}.png`;this.lastImage=image;
  const state=graph.states.find(s=>s.id===observation.stateId);if(state&&!state.representative)state.representative={observationId:observation.id,screenshot:observation.screenshot,capturedAt:observation.capturedAt};if(state&&!state.digest)state.digest=observation.digest;
  // One decode per capture: the compressed preview for the site/model and the pixel diff share it.
  const config=await this.store.config();this.lastDecoded=null;try{this.lastDecoded=decodePng(image);}catch{}
@@ -255,7 +265,7 @@ export class Runtime{
   */
  async goto({runId,target,profile='default',environment,screen,state,plan:dry=false,mode='walk'},owner='interface'){if(!screen&&!state)throw Error('Provide a screen or a state');
   const config=await this.store.config();let graph=await this.store.graph(),run=runId?await this.live(runId):this.active?await this.live(this.active):null,goals,wanted;
-  if(state){const matches=graph.states.filter(s=>s.id===state||(state.length>=6&&s.id.startsWith(state)));if(matches.length!==1)throw Error('Unknown or ambiguous state');goals=new Set([matches[0].id]);wanted=graph.screens.find(s=>s.id===matches[0].screenId);}
+  if(state){const goal=resolveState(graph,state);goals=new Set([goal.id]);wanted=graph.screens.find(s=>s.id===goal.screenId);}
   else{wanted=resolveScreen(graph,screen,run?.target??target);goals=new Set(graph.states.filter(s=>s.screenId===wanted.id).map(s=>s.id));}
   const scope=run??{target:target??wanted.target,profile,environment:environment??defaultEnvironment(config),envKey:envKey(config,environment),preconditions:{},version:null};
   let ownMission=false;const build=(known,avoid)=>decisionGraph(known,{entries:[known.entries?.[entryKey(scope)],ownMission?null:run?.observations[0]?.stateId].filter(Boolean),goals,target:scope.target,profile:scope.profile,environment:envOf(scope),preconditions:scope.preconditions,version:scope.version,allowDeeplinks:config.permissions.actions.includes('deeplink'),avoid});
@@ -359,7 +369,7 @@ export class Runtime{
   if(decision==='approve'){const merged=mergeDraft(base,draft,recorded,run.changes);await this.store.saveRecorded(merged);if(!this.store.draftId())await this.syncMap(merged);}else await this.store.saveRecorded(carryOver(base,draft,recorded));
   await this.dropDraft(runId);run.review={...run.review,status:decision==='approve'?'approved':'discarded',decidedAt:now()};await this.store.saveRun(run);return run;}
  /** One screen in a few lines, built from what is already recorded: no device access and no agent reasoning needed. */
- async screenContext({screen:ref}){const graph=await this.store.graph(),config=await this.store.config(),screen=resolveScreen(graph,ref),target=config.targets[screen.target],states=graph.states.filter(s=>s.screenId===screen.id),state=states.at(-1);let observation;try{observation=state&&JSON.parse((await this.store.resource(`evidence/${state.lastSeen}.json`)).toString());}catch{}
+ async screenContext({screen:ref,state:stateRef}){const graph=await this.store.graph(),config=await this.store.config(),screen=shownScreen(graph,ref,stateRef),target=config.targets[screen.target],states=graph.states.filter(s=>s.screenId===screen.id),/* The state asked for (a link to one state, or `state`); without one, the latest state the screen got. */state=stateRef?resolveState(graph,stateRef,screen.id):states.at(-1);let observation;try{observation=state&&JSON.parse((await this.store.resource(`evidence/${state.lastSeen}.json`)).toString());}catch{}
   return screenContext(graph,screen,{observation,appId:target?.package??target?.url,platform:target?.platform,stateLabel:state?.name,stateLabels:[...new Set(states.map(s=>s.name))],entry:entryPoints(graph,{target:screen.target}).screens[screen.id]});}
  /** Name screens and group flows in a single call. */
  async organize({screens=[],flows=[],apis=[]}){const updated=[],owners=[];for(const rule of apis)owners.push(await this.apiOwner(rule));for(const item of screens){const graph=await this.store.graph(),screen=resolveScreen(graph,item.id);await this.annotate({screenId:screen.id,name:item.name,description:item.description??screen.description??''});updated.push(screen.id);}const grouped=[];for(const flow of flows)grouped.push(await this.groupFlow(flow));return {screens:updated.length,flows:grouped.map(f=>({id:f.id,screens:f.screenIds.length})),...(owners.length?{apis:owners}:{})};}
@@ -368,7 +378,7 @@ export class Runtime{
  async finishMission(id){const run=await this.live(id);await this.settleNetwork(run,{quick:false});const observation=await this.captureRun(run);run.diagnostics=await this.diagnostics(run);run.checks=run.assertions.map(assertion=>{let passed;if(assertion.type==='state')passed=assertion.value.length>=6&&observation.stateId.startsWith(assertion.value);if(assertion.type==='text')passed=observation.text.includes(assertion.value);if(assertion.type==='no_errors')passed=run.diagnostics.availability==='available'?!run.diagnostics.logs.some(l=>l.level==='error'):undefined;return {assertion,result:passed===undefined?'not_verified':passed?'passed':'failed',evidence:observation.id};});run.status='completed';run.finishedAt=now();run.result=!run.checks.length?'not_verified':run.checks.some(c=>c.result==='failed')?'failed':run.checks.some(c=>c.result==='not_verified')?'not_verified':'passed';run.coverage={visited:run.frontier.filter(f=>f.status==='visited').length,pending:run.frontier.filter(f=>f.status==='pending').length,skipped:run.frontier.filter(f=>f.status==='skipped').length,scope:'discovered_interactions'};await this.store.saveRun(run);await this.syncMap(await this.store.graph());await this.executor.close();this.active=null;this.executor=null;return run;}
  async annotate({screenId,description,name,sources,evidence=[]}){const graph=await this.store.graph(),screen=resolveScreen(graph,screenId);screenId=screen.id;for(const ref of evidence)await this.store.resource(`evidence/${ref}.json`);const revision={id:uid(),kind:'screen',screenId,description,name,...(sources?{sources}:{}),evidence,time:now(),interpretation:true};graph.descriptions.push(revision);Object.assign(screen,{description,name:name||screen.name,...(sources?{sources}:{})});await this.store.saveGraph(graph);await this.syncMap(graph);return revision;}
  /** Agent understanding of a transition, state or flow, versioned separately from the deterministic summary. */
- async describe({kind,id,description,name}){const graph=await this.store.graph();const collection={transition:graph.transitions,state:graph.states,flow:graph.flows??[]}[kind];const item=collection?.find(x=>x.id===id);if(!item)throw Error(`${kind} not found`);const revision={id:uid(),kind,targetId:id,description,name,time:now(),interpretation:true};graph.descriptions.push(revision);item.description=description;if(name)item.name=name;await this.store.saveGraph(graph);await this.syncMap(graph);return revision;}
+ async describe({kind,id,description,name}){const graph=await this.store.graph();const collection={transition:graph.transitions,state:graph.states,flow:graph.flows??[]}[kind];const item=kind==='state'?graph.states.find(s=>s.id===id)??(()=>{try{return resolveState(graph,id);}catch{}})():collection?.find(x=>x.id===id);if(!item)throw Error(`${kind} not found`);id=item.id;const revision={id:uid(),kind,targetId:id,description,name,time:now(),interpretation:true};graph.descriptions.push(revision);item.description=description;if(name)item.name=name;await this.store.saveGraph(graph);await this.syncMap(graph);return revision;}
  async exportMap(){const config=await this.store.config();const graph=await this.store.graph();const result=await exportMap(this.store,config,graph);if(!result)return {enabled:false};await this.store.saveGraph(graph);this.mapError=null;return {enabled:true,...result};}
  /** The agent recognises it cannot proceed and asks; the answer is remembered in the harness. */
  /** Secret references the profile already provides (environment variable set, or a stored answer). */
@@ -420,11 +430,12 @@ export class Runtime{
   * Fold screens (or states) recorded twice into one. Within a mission that records for review, the merge waits for the
   * person's approval with the rest of what the mission found.
   */
- async merge({into,from,kind='screen'}){const graph=await this.store.graph();
-  if(kind==='state'){const find=ref=>{const hits=graph.states.filter(s=>s.id===ref||(String(ref).length>=6&&s.id.startsWith(ref)));if(hits.length!==1)throw Error(`Unknown or ambiguous state "${ref}"`);return hits[0];};const keep=find(into),folded=mergeStates(graph,keep.id,from.map(ref=>find(ref).id));await this.store.saveGraph(graph);await this.syncMap(graph);return {kind,into:keep.id,merged:folded.length,pending:!!this.store.draftId()};}
-  const keep=resolveScreen(graph,into),folded=mergeScreens(graph,keep.id,from.map(ref=>resolveScreen(graph,ref).id));
+ async merge({into,from,kind='screen',as}){const graph=await this.store.graph();
+  if(kind==='state'){const find=ref=>resolveState(graph,ref);const keep=find(into),folded=mergeStates(graph,keep.id,from.map(ref=>find(ref).id));await this.store.saveGraph(graph);await this.syncMap(graph);return {kind,into:keep.id,merged:folded.length,pending:!!this.store.draftId()};}
+  // as=state: the screens in `from` become states of `into`, kept apart from the states it already had.
+  const keep=resolveScreen(graph,into),ids=from.map(ref=>resolveScreen(graph,ref).id),moved=as==='state'?graph.states.filter(s=>s.screenId!==keep.id&&ids.includes(s.screenId)).map(s=>s.id):[],folded=mergeScreens(graph,keep.id,ids,{asState:as==='state'});
   await this.store.saveGraph(graph);await this.syncMap(graph);
-  return {kind,into:{id:keep.id,name:keep.name},merged:folded.map(f=>f.name),states:graph.states.filter(s=>s.screenId===keep.id).length,pending:!!this.store.draftId()};}
+  return {kind,into:{id:keep.id,name:keep.name},merged:folded.map(f=>f.name),states:graph.states.filter(s=>s.screenId===keep.id).length,...(moved.length?{becameStates:graph.states.filter(s=>moved.includes(s.id)).map(s=>({id:s.id,name:s.name}))}:{}),pending:!!this.store.draftId()};}
  /**
   * A `screen` script written from what the map already knows: for each screen, the ids and texts it always shows and no
   * other screen does, checked against real captures. The agent proposes it with `harness_propose`; a person approves it.

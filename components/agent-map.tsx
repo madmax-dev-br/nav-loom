@@ -1,10 +1,11 @@
 'use client';
-import {useEffect,useMemo,useRef,useState,type RefObject} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type RefObject} from 'react';
 import {ArrowUpRight,Braces,ChevronsDown,ChevronsUp,CornerUpLeft,Keyboard,Link2,RefreshCw,Timer} from 'lucide-react';
-import {AgentCanvas} from '@/components/agent-canvas';
+import {AgentCanvas,type Reveal} from '@/components/agent-canvas';
 import {AgentActions} from '@/components/agent-actions';
-import {screenRoutes} from '@/lib/agent-screen-routes';
-import {layoutColumns,linkDirection} from '@/lib/agent-map-layout';
+import {PENDING_SCREEN,pendingStep,screenRoutes} from '@/lib/agent-screen-routes';
+import {CopyScreenLink} from '@/components/screen-details';
+import {layoutColumns,linkDirection,placePending} from '@/lib/agent-map-layout';
 import {screenApis} from '@/lib/api-role.mjs';
 
 type Obj=Record<string,any>;
@@ -42,7 +43,7 @@ function spread(items:Obj[],key:string,size:(item:Obj)=>number,min:number,max:nu
 function measure(root:HTMLElement,routes:Obj[]):Drawing[]{
  const bounds=root.getBoundingClientRect(),scale=bounds.width/root.offsetWidth||1;
  const rect=(el:Element):Box=>{const r=el.getBoundingClientRect();return {x:(r.left-bounds.left)/scale,y:(r.top-bounds.top)/scale,width:r.width/scale,height:r.height/scale};};
- const cards=new Map<string,HTMLElement>();root.querySelectorAll<HTMLElement>('[data-graph-screen]').forEach(el=>cards.set(el.dataset.graphScreen!,el));
+ const cards=new Map<string,HTMLElement>();root.querySelectorAll<HTMLElement>('[data-graph-screen]:not([data-unplaced])').forEach(el=>cards.set(el.dataset.graphScreen!,el));
  const items:Obj[]=[];
  const loads=new Map<string,Obj>();
  for(const route of routes){
@@ -75,7 +76,8 @@ function measure(root:HTMLElement,routes:Obj[]):Drawing[]{
   load.y=load.b.y+load.b.height/2;void half;void room;
   incoming.forEach(item=>{item.viaLoad=true;item.ex=load.b.x-LOAD_GAP-LOAD_WIDTH;item.ey=load.y;});
  }
- for(const item of items)if(item.b&&!item.viaLoad)item.ey=item.b.y+item.b.height/2;
+ // The placeholder of a live mission is entered level with where its arrow leaves, when it sits beside the source: a short straight arrow.
+ for(const item of items)if(item.b&&!item.viaLoad)item.ey=item.route.pending?Math.max(item.b.y+28,Math.min(item.b.y+item.b.height-28,item.sy)):item.b.y+item.b.height/2;
  // One curve shape per pair of sides: straight across, back across, or looping out and in on the right.
  const curve=(sx:number,sy:number,ex:number,ey:number,exit:string,enter:string)=>{
   if(exit==='right'&&enter==='left'){const bend=Math.max(24,(ex-sx)*.5);return `M${sx} ${sy} C${sx+bend} ${sy},${ex-bend} ${ey},${ex} ${ey}`;}
@@ -116,26 +118,27 @@ function measure(root:HTMLElement,routes:Obj[]):Drawing[]{
  return drawn;
 }
 
-function Edges({container,routes,highlighted,onHover,onSelect,onExit,onState,mark}:{mark?:(route:Obj)=>string;container:RefObject<HTMLDivElement|null>;routes:Obj[];highlighted:string|null;onHover:(id:string|null)=>void;onSelect:(id:string)=>void;onExit:(route:Obj)=>void;onState:(screenId:string,stateId:string)=>void}){
+function Edges({container,routes,highlighted,onHover,onSelect,onExit,onState,mark,layoutKey,onMeasured}:{/** Changes when something drawn outside the columns moves, so the connections are measured again. */layoutKey?:string;/** Called once the connections and their labels of a measure are on the page. */onMeasured?:()=>void;mark?:(route:Obj)=>string;container:RefObject<HTMLDivElement|null>;routes:Obj[];highlighted:string|null;onHover:(id:string|null)=>void;onSelect:(id:string)=>void;onExit:(route:Obj)=>void;onState:(screenId:string,stateId:string)=>void}){
  const [state,setState]=useState<{drawings:Drawing[];width:number;height:number}>({drawings:[],width:0,height:0});
  useEffect(()=>{const root=container.current;if(!root)return;let frame=0;
   const run=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>setState({drawings:measure(root,routes),width:root.scrollWidth,height:root.scrollHeight}));};
   const observer=new ResizeObserver(run);observer.observe(root);root.querySelectorAll('[data-graph-screen]').forEach(el=>observer.observe(el));root.querySelectorAll('img').forEach(img=>img.addEventListener('load',run,{once:true}));run();
   return()=>{cancelAnimationFrame(frame);observer.disconnect();};
- },[container,routes]);
+ },[container,routes,layoutKey]);
+ useLayoutEffect(()=>{onMeasured?.();},[state,onMeasured]);
  const active=(d:Drawing)=>!!highlighted&&!d.route.exitFlow&&!d.route.load&&d.route.actionIds.includes(highlighted);
  const icon=(type:string,direction?:string)=>type==='scroll'?(direction==='up'?<ChevronsUp size={12}/>:<ChevronsDown size={12}/>):type==='back'?<CornerUpLeft size={11}/>:type==='deeplink'?<Link2 size={11}/>:type==='wait'?<Timer size={11}/>:type==='fill'?<Keyboard size={11}/>:null;
  const paths=(list:Drawing[],top:boolean)=><svg className={'map-edges '+(top?'is-top':'')} width={state.width} height={state.height} aria-hidden="true">
-  <defs>{['idle','back','active','exit','state','load'].map(tone=><marker key={tone} id={`map-arrow-${tone}${top?'-top':''}`} viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1.5 1.5L8.5 5L1.5 8.5" className={'map-arrow '+tone}/></marker>)}</defs>
-  {list.map(d=>{const tone=top?'active':d.route.exitFlow?'exit':d.route.block?'state':d.route.load?'load':d.route.direction==='back'?'back':'idle';return <g key={d.id} data-screen-route={d.id} data-direction={d.route.direction} className={top?'':mark?.(d.route)??''}>
+  <defs>{['idle','back','active','exit','state','load','pending'].map(tone=><marker key={tone} id={`map-arrow-${tone}${top?'-top':''}`} viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1.5 1.5L8.5 5L1.5 8.5" className={'map-arrow '+tone}/></marker>)}</defs>
+  {list.map(d=>{const tone=top?'active':d.route.pending?'pending':d.route.exitFlow?'exit':d.route.block?'state':d.route.load?'load':d.route.direction==='back'?'back':'idle';return <g key={d.id} data-screen-route={d.id} data-direction={d.route.direction} className={top?'':mark?.(d.route)??''}>
    <path d={d.path} className={`map-edge ${tone} ${highlighted&&!top?'is-dimmed':''}`} markerEnd={d.arrow?`url(#map-arrow-${tone}${top?'-top':''})`:undefined}/>
-   {!top&&!d.route.exitFlow&&!d.route.block&&!d.route.load&&<path d={d.path} className="map-edge-hit" onMouseEnter={()=>onHover(d.route.actionIds[0])} onMouseLeave={()=>onHover(null)} onClick={()=>onSelect(d.route.actionIds[0])}><title>{d.route.actionType==='wait'?'Transição automática':d.route.actionType==='back'?'Voltar':d.route.name}</title></path>}
+   {!top&&!d.route.exitFlow&&!d.route.block&&!d.route.load&&!d.route.pending&&<path d={d.path} className="map-edge-hit" onMouseEnter={()=>onHover(d.route.actionIds[0])} onMouseLeave={()=>onHover(null)} onClick={()=>onSelect(d.route.actionIds[0])}><title>{d.route.actionType==='wait'?'Transição automática':d.route.actionType==='back'?'Voltar':d.route.name}</title></path>}
   </g>;})}
  </svg>;
  return <>
   {paths(state.drawings,false)}
   {paths(state.drawings.filter(active),true)}
-  <svg className="map-origins" width={state.width} height={state.height} aria-hidden="true">{state.drawings.filter(d=>d.origin&&(d.route.direction!=='back'||active(d))).map(d=><g key={d.id} className={active(d)?'is-active':highlighted?'is-dimmed':''}><path d={d.origin!.path}/><circle cx={d.origin!.x} cy={d.origin!.y} r="3.5"/></g>)}</svg>
+  <svg className="map-origins" width={state.width} height={state.height} aria-hidden="true">{state.drawings.filter(d=>d.origin&&(d.route.direction!=='back'||active(d))).map(d=><g key={d.id} className={d.route.pending?'is-pending':active(d)?'is-active':highlighted?'is-dimmed':''}><path d={d.origin!.path}/><circle cx={d.origin!.x} cy={d.origin!.y} r="3.5"/></g>)}</svg>
   <div className="map-labels">{state.drawings.filter(d=>d.route.direction!=='back'||active(d)).flatMap(d=>d.labels.map((label,i)=>{const route=d.route,api=route.apis?.[0],type=route.actionType,actionId=route.actionIds[0],key=d.id+':'+i,at={left:label.x,top:label.y},dimmed=(highlighted&&!active(d)?'is-dimmed ':'')+(mark?.(route)??'');
    if(label.kind==='exit')return <button key={key} className={'map-edge-label map-exit-label '+dimmed} style={at} title={`“${route.name}” leva a ${route.toName}, no fluxo ${route.exitFlow.name}`} aria-label={`Ir para o fluxo ${route.exitFlow.name} por ${route.name}`} onClick={()=>onExit(route)}><ArrowUpRight size={12}/><span>{clip(route.exitFlow.name,26)}</span><code>{clip(route.name,30)} → {clip(route.toName,18)}</code></button>;
    if(label.kind==='load')return <div key={key} className={'map-load-block '+dimmed} style={{...at,width:LOAD_WIDTH}} title={`Ao entrar em ${route.toName}, o app chama:\n${route.apis.map(apiText).join('\n')}`}><small>ao entrar</small>{route.apis.map((a:Obj)=><code key={apiText(a)}>{clip(apiText(a),24)}</code>)}</div>;
@@ -166,12 +169,15 @@ export function displayStates(ids:string[],observations:Obj[],graph:Obj,chosen:R
  return map;
 }
 
-export function AgentMap({marks,graph,run,observations,screens,projectId,resetKey,visibleKinds,showReturns,selectedScreen,selectedEdge,onSelectScreen,onSelectEdge,flowId,onExitFlow,chosenStates:chosen,onChooseState,focus}:{marks?:{screen:(id:string)=>string;route:(route:Obj)=>string};chosenStates:Record<string,string>;onChooseState:(screenId:string,stateId:string)=>void;focus?:{screenId:string;identity:string}|null;graph:Obj;run?:Obj;flowId?:string;onExitFlow?:(exit:{flow:Obj;via:string;toScreen:string;toName:string;fromName:string})=>void;observations:Obj[];screens:Obj[];projectId:string;resetKey:string;visibleKinds:string[];showReturns:boolean;selectedScreen:string;selectedEdge:string|null;onSelectScreen:(id:string)=>void;onSelectEdge:(id:string|null)=>void}){
+export function AgentMap({marks,graph,run,live,observations,screens,projectId,resetKey,visibleKinds,showReturns,selectedScreen,selectedEdge,onSelectScreen,onSelectEdge,flowId,onExitFlow,chosenStates:chosen,onChooseState,focus}:{marks?:{screen:(id:string)=>string;route:(route:Obj)=>string};chosenStates:Record<string,string>;onChooseState:(screenId:string,stateId:string)=>void;focus?:{screenId:string;identity:string}|null;graph:Obj;run?:Obj;/** The mission in progress, when the map follows one: its next screen is drawn as a placeholder until it is captured. */live?:Obj|null;flowId?:string;onExitFlow?:(exit:{flow:Obj;via:string;toScreen:string;toName:string;fromName:string})=>void;observations:Obj[];screens:Obj[];projectId:string;resetKey:string;visibleKinds:string[];showReturns:boolean;selectedScreen:string;selectedEdge:string|null;onSelectScreen:(id:string)=>void;onSelectEdge:(id:string|null)=>void}){
  const container=useRef<HTMLDivElement>(null),[hovered,setHovered]=useState<string|null>(null);
  const highlighted=selectedEdge??hovered;
  const idKey=screens.map(s=>s.id).join(),ids=useMemo(()=>idKey.split(',').filter(Boolean),[idKey]);
  const display=useMemo(()=>displayStates(ids,observations,graph,chosen),[ids,observations,graph,chosen]);
- const {columns,routes,index}=useMemo(()=>{
+ // Only what the placeholder depends on, so a poll that changes nothing else redraws nothing.
+ const next=pendingStep(live),pendingKey=next&&ids.includes(next.fromScreen)?JSON.stringify(next):'';
+ const {columns,routes,index,pending}=useMemo(()=>{
+  const pending:Obj|null=pendingKey?JSON.parse(pendingKey):null;
   const screenOf=(stateId:string)=>graph.states.find((x:Obj)=>x.id===stateId)?.screenId,statusOf=(apis:Obj[])=>[...new Set(apis.flatMap(a=>a.statuses??[]))].join('/');
   const control=(route:Obj)=>route.origin==='automatic'?'automatic':route.elementIdentity??route.name;
   // A deeplink can be opened from anywhere, so it is shown as an entry of its screen, not as a path from where it happened to be used.
@@ -187,7 +193,7 @@ export function AgentMap({marks,graph,run,observations,screens,projectId,resetKe
   }
   const all:Obj[]=[...merged.values()];
   // Depth comes from forward taps only: the system back button says nothing about where a screen belongs.
-  const layout=layoutColumns(ids,all.filter(route=>route.actionType!=='back') as any);
+  const layout=layoutColumns(ids,all.filter(route=>route.actionType!=='back') as any,pending?{id:PENDING_SCREEN,from:pending.fromScreen}:undefined);
   const directed:Obj[]=all.map((route:Obj)=>({...route,direction:route.actionType==='back'?'back':linkDirection(layout.depth,route as any)})).filter((route:Obj)=>showReturns||route.direction!=='back');
   // Flowchart of an action: when a control of the state on display can also leave the screen in another state
   // (any state: an error, a loading step, a filled form), it becomes a block whose outcomes branch from it.
@@ -220,12 +226,33 @@ export function AgentMap({marks,graph,run,observations,screens,projectId,resetKe
     if(!shown.has(route.fromScreen)||shown.has(route.toScreen)||['back','deeplink'].includes(route.actionType))continue;
     for(const flow of graph.flows??[])if(flow.id!==flowId&&flow.screenIds.includes(route.toScreen)&&!exits.some(e=>e.exitFlow.id===flow.id&&e.fromScreen===route.fromScreen&&e.name===route.name))exits.push({...route,fromStates:[route.fromState],id:`exit-${route.id}-${flow.id}`,exitFlow:flow,direction:'exit',toName:names.get(route.toScreen)??'',fromName:names.get(route.fromScreen)??''});
    }}
-  return {columns:layout.columns,routes:[...directed,...blocks,...loadBlocks,...exits],index:new Map(ids.map((id,i)=>[id,i+1]))};
- },[graph,run,visibleKinds,ids,showReturns,flowId,display]);
+  // Where the mission is heading: a provisional arrow from the screen the agent is on (from the control it used, when it used one) to the placeholder.
+  const ahead:Obj[]=pending?[{id:'pending',pending:true,fromScreen:pending.fromScreen,toScreen:PENDING_SCREEN,fromStates:[pending.fromState],origin:pending.elementIdentity?'interaction':'automatic',elementIdentity:pending.elementIdentity,name:pending.name,actionType:pending.actionType,actionIds:[],apis:[],direction:'forward'}]:[];
+  return {columns:layout.columns,routes:[...directed,...blocks,...loadBlocks,...exits,...ahead],index:new Map(ids.map((id,i)=>[id,i+1])),pending};
+ },[graph,run,visibleKinds,ids,showReturns,flowId,display,pendingKey]);
  const active=routes.find((r:Obj)=>highlighted&&!r.exitFlow&&!r.load&&r.actionIds.includes(highlighted));
+ // The placeholder is laid over the map, beside the screen it comes from, instead of taking a place in a column: no known screen moves for it.
+ const [slot,setSlot]=useState<{from:string;x:number;y:number}|null>(null),reveal=useRef<Reveal|null>(null),revealed=useRef(''),from=pending?.fromScreen as string|undefined;
+ const place=useCallback(()=>{
+  const root=container.current,card=root?.querySelector<HTMLElement>('.map-card.is-pending'),source=from?[...root?.querySelectorAll<HTMLElement>('[data-graph-screen]')??[]].find(el=>el.dataset.graphScreen===from):undefined;
+  if(!root||!card||!source||!from){setSlot(old=>old&&null);return;}
+  const bounds=root.getBoundingClientRect(),scale=bounds.width/root.offsetWidth||1,box=(el:Element)=>{const r=el.getBoundingClientRect();return {x:(r.left-bounds.left)/scale,y:(r.top-bounds.top)/scale,width:r.width/scale,height:r.height/scale};};
+  const next=source.parentElement?.nextElementSibling,cards=[...root.querySelectorAll('.map-column .map-card')].map(box);
+  const at=placePending(box(source),{width:card.offsetWidth,height:card.offsetHeight},{columnX:next?.matches('.map-column')?box(next).x:undefined,cards,labels:[...root.querySelectorAll('.map-labels>*')].map(box)});
+  setSlot(old=>old&&old.from===from&&Math.abs(old.x-at.x)<.5&&Math.abs(old.y-at.y)<.5?old:{from,x:at.x,y:at.y});
+ },[container,from]);
+ const placed=slot&&slot.from===from?slot:null;
+ // Show it when it appears or leaves from another screen, if it is out of sight. Later polls and the user's own panning are left alone.
+ useEffect(()=>{
+  if(!from){revealed.current='';return;}
+  if(!placed||revealed.current===from)return;
+  // Two frames: the arrow and the labels around it settle first.
+  let frame=requestAnimationFrame(()=>{frame=requestAnimationFrame(()=>{const root=container.current,card=root?.querySelector('.map-card.is-pending'),source=[...root?.querySelectorAll<HTMLElement>('[data-graph-screen]')??[]].find(el=>el.dataset.graphScreen===from);revealed.current=from;if(card&&source)reveal.current?.([source,card]);});});
+  return()=>cancelAnimationFrame(frame);
+ },[placed,from,container]);
  const byId=new Map(screens.map(s=>[s.id,s]));
- return <AgentCanvas container={container} resetKey={resetKey}>
-  <Edges mark={marks?.route} container={container} routes={routes} highlighted={highlighted} onHover={setHovered} onState={(screenId,stateId)=>{onChooseState(screenId,stateId);onSelectEdge(null);}} onSelect={id=>{onSelectEdge(id);const route=routes.find((r:Obj)=>!r.exitFlow&&r.actionIds.includes(id));if(route)onSelectScreen(route.toScreen);}} onExit={route=>onExitFlow?.({flow:route.exitFlow,via:route.name,toScreen:route.toScreen,toName:route.toName,fromName:route.fromName})}/>
+ return <AgentCanvas container={container} resetKey={resetKey} reveal={reveal}>
+  <Edges layoutKey={placed?`${placed.x},${placed.y}`:''} onMeasured={place} mark={marks?.route} container={container} routes={routes} highlighted={highlighted} onHover={setHovered} onState={(screenId,stateId)=>{onChooseState(screenId,stateId);onSelectEdge(null);}} onSelect={id=>{onSelectEdge(id);const route=routes.find((r:Obj)=>!r.exitFlow&&r.actionIds.includes(id));if(route)onSelectScreen(route.toScreen);}} onExit={route=>onExitFlow?.({flow:route.exitFlow,via:route.name,toScreen:route.toScreen,toName:route.toName,fromName:route.fromName})}/>
   {columns.map((column,depth)=><div className="map-column" key={depth}>{column.map(id=>{
    const s=byId.get(id)!,{states,current}=display.get(id)??{states:[],current:undefined},o=current?.capture,portrait=(o?.viewport?.height??0)>(o?.viewport?.width??1);
    const own=screenApis(graph,id),apis=new Set<string>([...own.load,...own.action].map(apiText));
@@ -238,9 +265,18 @@ export function AgentMap({marks,graph,run,observations,screens,projectId,resetKe
       <AgentActions observation={o} graph={graph} run={run} visibleKinds={visibleKinds} onHighlight={setHovered} selectedEdge={selectedEdge} highlightedEdge={highlighted} focusIdentity={focus?.screenId===id?focus.identity:undefined} onSelect={edge=>{onSelectEdge(edge);onSelectScreen(id);}}/>
      </div></div>:<p className="map-card-empty">Sem captura nesta execução</p>}
     <footer>
+     <CopyScreenLink compact screenId={id} stateId={current?.id} name={s.name}/>
      {s.deeplinks?.length>0&&<span title={'Entrada por deeplink\n'+s.deeplinks.map((d:Obj)=>d.url).join('\n')}><Link2 size={12}/>{clip(s.deeplinks[0].url,26)}</span>}
      {apis.size>0&&<span title={[...own.load.map((a:Obj)=>`ao entrar: ${apiText(a)}`),...own.action.map((a:Obj)=>`em “${a.via}”: ${apiText(a)}`)].join('\n')}><Braces size={12}/>{apis.size} API{apis.size>1?'s':''}</span>}
     </footer>
    </article>;})}</div>)}
+  {pending&&(()=>{
+   // Sized like the screen it comes from. Until it has a place it takes none and nothing is drawn towards it.
+   const view=display.get(pending.fromScreen)?.current?.capture?.viewport,tall=(view?.height??0)>(view?.width??1),what=pending.acting?(pending.name?`Depois de “${clip(pending.name,22)}”`:'Capturando a tela'):'Aguardando o agente';
+   return <article data-graph-screen={PENDING_SCREEN} data-unplaced={placed?undefined:''} style={placed?{left:placed.x,top:placed.y}:{left:0,top:0,visibility:'hidden'}} className={`map-card is-pending ${tall?'is-portrait':''}`} aria-label="Próxima tela, ainda em montagem" aria-busy="true">
+    <header className="map-card-head"><div className="map-card-title"><span>…</span><strong>Em montagem</strong></div></header>
+    <div className="map-shot"><div className="agent-image map-pending-shot" style={{aspectRatio:view?.width&&view?.height?`${view.width}/${view.height}`:tall?'9/19':'16/10'}}><i/><i/><i/><i/></div></div>
+    <footer><span>{what}</span></footer>
+   </article>;})()}
  </AgentCanvas>;
 }

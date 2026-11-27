@@ -21,3 +21,17 @@ export function screenRoutes(graph:Obj,runId:string|undefined,kinds:string[],scr
  }
  return [...groups.values()].map((group,index)=>({...group,lane:index}));
 }
+/** Id of the placeholder card drawn for the screen a live mission has not captured yet. */
+export const PENDING_SCREEN='__pending__';
+/**
+ * Where a live mission is, read from the run the interface already polls: its last capture is the screen the agent is
+ * on, and a last step still `running` from that capture is an action whose resulting screen has not been recorded.
+ * Null when the run is not running or has captured nothing: then there is no screen being assembled.
+ */
+export function pendingStep(run:Obj|undefined|null){
+ if(!run||run.status!=='running')return null;
+ const last=run.observations?.at(-1);if(!last?.screenId)return null;
+ const step=run.steps?.at(-1),acting=step?.status==='running'&&step.before===last.id,action=acting?step.action:undefined;
+ const element=action?.elementId?last.elements?.find((e:Obj)=>e.id===action.elementId):undefined;
+ return {fromScreen:last.screenId as string,fromState:last.stateId as string,acting:!!acting,actionType:action?.type as string|undefined,elementIdentity:element?.identity as string|undefined,name:(element?.label||element?.name) as string|undefined};
+}

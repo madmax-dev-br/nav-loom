@@ -274,3 +274,30 @@
 .screen-info dl{display:grid;gap:4px;margin:4px 0 8px}.screen-info dl>div{display:flex;justify-content:space-between;gap:10px;font-size:12.5px}.screen-info dt{color:var(--k-6b7a84)}.screen-info dd{margin:0;text-align:right;overflow-wrap:anywhere}
 .screen-info-tags{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px}.screen-info-tags span{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--k-e1e7e4)}
 .script-editor-try>div>button{justify-self:start;display:inline-flex;flex-direction:row;align-items:center;gap:6px}
+/* harness counters */
+.harness-counts{display:grid;gap:2px;margin-top:4px;padding-top:8px;border-top:1px solid var(--k-edf1ef);font-size:11.5px;line-height:1.5;color:var(--k-52636d)}.harness-counts span{cursor:help}.harness-counts b{font-weight:600;color:var(--k-1f6a52);font-variant-numeric:tabular-nums}.harness-counts .is-zero{color:var(--k-8a979f)}.harness-counts-note{margin:10px 2px 0;font-size:11px;line-height:1.5;color:var(--k-6b7a84)}.harness-step{letter-spacing:.4px;text-transform:uppercase}.harness-card-title span[title],.harness-stats div[title],.harness-routes span[title]{cursor:help}
+/* map: pending screen, details, link */
+/* The screen a live mission has not captured yet: a grey card with no content, reached by a provisional arrow.
+   It is laid over the map beside the screen it comes from (see placePending), under the labels and over the lines it may cross. */
+.map-card.is-pending{position:absolute;z-index:2;margin:0}.map-card.is-pending::before{content:'';position:absolute;inset:-10px -12px;z-index:-1;border-radius:14px;background:var(--k-f4f6f5);opacity:.88}
+.map-card.is-pending .map-card-title{color:var(--k-6b7a84);cursor:default}.map-card.is-pending .map-card-title>span{background:var(--k-e1e8ec);color:var(--k-6b7a84)}
+.map-card.is-pending .map-pending-shot{position:relative;display:flex;flex-direction:column;gap:10px;padding:18px 14px;border:1px dashed var(--k-aab5bc);background:var(--k-e3ebe7);box-shadow:none}
+.map-pending-shot>i{display:block;height:10px;border-radius:5px;background:var(--k-d5dde1)}.map-pending-shot>i:nth-child(1){width:46%;height:14px}.map-pending-shot>i:nth-child(2){width:82%;margin-top:8px}.map-pending-shot>i:nth-child(3){width:64%}.map-pending-shot>i:nth-child(4){margin-top:auto;height:30px;border-radius:8px}
+.map-pending-shot::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,var(--k-ffffff99) 50%,transparent 70%);transform:translateX(-100%);animation:map-pending-shimmer 1.6s ease-in-out infinite}
+@keyframes map-pending-shimmer{to{transform:translateX(100%)}}
+.map-card.is-pending footer>*{border-style:dashed;background:transparent;color:var(--k-6b7a84)}
+.map-edge.pending{stroke:var(--k-8c9ca6);stroke-width:2;stroke-dasharray:5 5;animation:map-pending-flow .9s linear infinite}.map-arrow.pending{stroke:var(--k-8c9ca6)}.map-origins g.is-pending path{stroke:var(--k-8c9ca6);stroke-dasharray:5 5}.map-origins g.is-pending circle{fill:var(--k-8c9ca6)}
+@keyframes map-pending-flow{from{stroke-dashoffset:10}to{stroke-dashoffset:0}}
+@media(prefers-reduced-motion:reduce){.map-pending-shot::after{animation:none;display:none}.map-edge.pending{animation:none}}
+/* The live mission's status floats over the top of the canvas, so the map does not move when a mission starts or ends. */
+.is-map .agent-map-toolbar:has(+.agent-canvas-viewport){position:relative}
+.is-map .agent-map-toolbar:has(+.agent-canvas-viewport)>.agent-runbar{position:absolute;top:calc(100% + 22px);right:10px;z-index:5;flex:none;max-width:calc(100% - 20px);gap:4px 10px;padding:5px 6px 5px 8px;border:1px solid var(--k-d3dfe8);border-radius:10px;background:var(--k-fffffff2);box-shadow:0 3px 16px var(--k-24374612)}
+/* Unmapped actions stay inside the panel: the label gives way first, then the tag. */
+.agent-unmapped{grid-template-columns:minmax(0,1fr)}.agent-unmapped li code{flex:0 1 auto;min-width:0;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Copy the link of a screen: a chip under the card, a button in the details. */
+.map-card footer>.map-card-link{cursor:pointer}.map-card footer>.map-card-link.is-copied{border-color:var(--k-a9c4b8);color:var(--k-1f6a52)}
+.agent-copy-link{margin-top:6px}
+/* Deeplinks and API calls of the selected screen, folded until asked for. */
+.screen-fold{margin-top:8px;border:1px solid var(--k-e1e8ec);border-radius:8px}.screen-fold>summary{display:flex;align-items:center;gap:6px;padding:8px 10px;list-style:none;cursor:pointer;font-size:12px;font-weight:600;color:var(--k-3d4d57)}.screen-fold>summary::-webkit-details-marker{display:none}
+.screen-fold>summary>svg:first-child{color:var(--k-8c9ca6);transition:transform .16s ease}.screen-fold[open]>summary>svg:first-child{transform:rotate(90deg)}.screen-fold>summary>span{font-weight:400;color:var(--k-6b7a84);font-variant-numeric:tabular-nums}
+.screen-fold>ul{margin:0 10px 10px}.screen-fold-group{margin:0 10px 5px!important;font-size:10px!important;color:var(--k-6b7a84)!important}.screen-fold>ul+.screen-fold-group{margin-top:2px!important}
