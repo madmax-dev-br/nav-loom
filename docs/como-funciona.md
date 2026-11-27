@@ -134,6 +134,17 @@ Ao vivo, no emulador, com o app compilado sem tag nenhuma e sem resource ids, fo
   - Uma tela gravada duas vezes tem as mesmas saídas e entradas.
   - Duas listas parecidas (Produtos × Favoritos) são alcançadas por abas diferentes e ficam separadas (0,38).
 - `navloom_merge {into, from}` une telas (ou estados, com `kind: state`). Tudo o que apontava para a tela unida passa a apontar para a mantida: estados, transições (juntadas quando ficam iguais), fluxos, entradas, deeplinks, respostas lembradas, resultados do `goto` e campos de plugins. O id antigo vira apelido.
+- `navloom_merge {into, from, as: "state"}` **transforma uma tela em estado de outra**: para o diálogo, o passo ou a variação que foi gravada como tela à parte. Os estados da tela em `from` passam para `into` com os mesmos ids, evidências e transições, recebem o nome da tela que eram e nunca são juntados a outro estado (na fusão comum, estados que se parecem viram um só). A tela some e o id dela vira apelido, então uma captura que ainda a produza cai no estado. Dentro de uma missão `record` a mudança espera a aprovação como qualquer fusão ("Tela virou estado").
+
+### Link de tela: apontar uma tela para o agente
+
+No mapa e no preview, **Copiar link** copia `navloom://screen/<id da tela>` (com `?state=<id do estado>` quando um estado está selecionado; formato em `lib/screen-link.mjs`). Cole o link na conversa com o agente e diga o que quer: "transforme esta tela em estado da Home", "una com esta outra", "renomeie", "vá até aqui".
+
+- O link só nomeia a tela (ou o estado); o pedido vai no texto da conversa.
+- Toda operação que recebe uma tela ou um estado aceita o link no lugar do id. A troca é feita num ponto só (`resolveLinks` em `agent/operations.mjs`), antes de a operação rodar. Um link dentro de uma frase (uma descrição, uma pergunta) continua sendo texto.
+- Se a tela do link foi unida a outra depois, o link segue o apelido e vale para a tela mantida. Se ela não existe mais, o erro diz isso.
+- `navloom_screen {screen: link}` mostra o que o agente precisa antes de mexer: estados com id, como chegar, de onde se entra, deeplinks, chamadas, o que cada ação faz e as telas parecidas ("Parece com").
+- Para mudar: `navloom_organize` (nome e descrição), `navloom_merge {into, from: [link]}` (é a mesma tela) ou com `as: "state"` (é um estado da outra), `navloom_goto {screen: link}` (ir até ela; com `?state` vai até aquele estado).
 
 ### Script de identidade de tela
 
@@ -272,6 +283,8 @@ Exemplos: o total do carrinho, um aviso quando alguma chamada respondeu 4xx/5xx,
 
 Nada que o agente escreve roda antes de uma pessoa aprovar no painel Harness. Na aprovação os exemplos rodam e o script só ativa se todos conferirem. O código roda isolado (contexto V8 à parte, só JSON, 25 ms por chamada).
 
+**Números do painel Harness.** Os números de cada etapa são totais do projeto, somando todas as missões: missões abertas e concluídas, telas e estados no mapa, passos executados, transições guardadas (e quantas mudam de tela) e passos repetidos sem o agente. Em cada script, **Entradas analisadas** é quantas vezes ele rodou desde a revisão atual e **Reconhecidas** em quantas devolveu um resultado. Passe o mouse sobre um número para ver o que ele conta.
+
 **Ajuda (`navloom_ask`)**: credencial, valor, decisão, pré-condição, ambiente ou conta. A pergunta aparece no chat do agente (elicitation do MCP) ou no painel Ajuda. A resposta fica lembrada; segredos só em `.navloom/secrets.json`, fora do git.
 
 ## 8. Contas e ambientes
@@ -293,7 +306,7 @@ Um checkout limpo carrega o mapa quando `.navloom/graph.json` não existe; os pe
 
 ## 10. Ferramentas MCP
 
-**Núcleo** (padrão; cada definição custa tokens em todo turno, por isso o catálogo fica abaixo de 14,5 mil caracteres):
+**Núcleo** (padrão; cada definição custa tokens em todo turno, por isso o catálogo fica abaixo de 14,7 mil caracteres):
 
 | Ferramenta | Use para |
 |---|---|
@@ -304,9 +317,9 @@ Um checkout limpo carrega o mapa quando `.navloom/graph.json` não existe; os pe
 | `navloom_explore` | testar em lote os candidatos pendentes |
 | `navloom_frontier` | ver o que falta testar |
 | `navloom_observe` | capturar de novo (raro: step e goto já devolvem a tela) |
-| `navloom_screen` | uma tela em poucas linhas, com "Como chegar" |
+| `navloom_screen` | uma tela em poucas linhas, com "Como chegar", estados e parecidas; aceita o link `navloom://screen/...` |
 | `navloom_run`, `navloom_finish`, `navloom_pause`, `navloom_resume` | acompanhar e fechar a missão |
-| `navloom_merge` | unir telas ou estados gravados duas vezes |
+| `navloom_merge` | unir telas ou estados gravados duas vezes; `as: "state"` transforma uma tela em estado de outra |
 | `navloom_organize` | nomes, descrições, fluxos e a dona de cada endpoint |
 | `navloom_ask`, `navloom_answer`, `navloom_help` | pedir e registrar ajuda |
 | `navloom_harness`, `navloom_harness_propose` | scripts aprendidos (inclusive o de tela sugerido) |

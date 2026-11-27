@@ -27,16 +27,18 @@ export function identity(observation,target){
 export function placeScroll(graph,observation,target,scrolledFrom,previous){
  const natural=structureKey(observation),view=viewSignature(observation);observation.naturalState=natural;
  if(!scrolledFrom){if(previous?.scrollBase&&previous.naturalState===natural&&viewSignature(previous)===view){observation.stateOverride=previous.stateId;observation.scrollBase=previous.scrollBase;observation.stateName=previous.stateName;}return;}
- const base=scrolledFrom.scrollBase??scrolledFrom.stateId,root=graph.states.find(s=>s.id===base);
- if(view===viewSignature(scrolledFrom)){observation.stateOverride=scrolledFrom.stateId;observation.scrollBase=scrolledFrom.scrollBase;observation.stateName=scrolledFrom.stateName;return;}
- if(root?.viewSig===view){observation.stateOverride=base;return;}
- observation.stateOverride=hash([base,'scroll',view]);observation.scrollBase=base;observation.stateName=`${root?.name??'estado'} · rolado`;
+ const base=scrolledFrom.scrollBase??scrolledFrom.stateId,root=graph.states.find(s=>s.id===base),keyboard=!!observation.keyboard,rootKeyboard=root?!!root.keyboard:!!scrolledFrom.keyboard;
+ // A scroll may also open or close the keyboard. The view is then the same but the state is not: it is never put on the state
+ // it came from, it is placed like any other capture (unscrolled) or as the scrolled view with that keyboard.
+ if(view===viewSignature(scrolledFrom)){if(keyboard===!!scrolledFrom.keyboard){observation.stateOverride=scrolledFrom.stateId;observation.scrollBase=scrolledFrom.scrollBase;observation.stateName=scrolledFrom.stateName;return;}if(!scrolledFrom.scrollBase)return;}
+ if(root?.viewSig===view){if(keyboard===rootKeyboard)observation.stateOverride=base;return;}
+ observation.stateOverride=hash([base,'scroll',view,...(keyboard===rootKeyboard?[]:['keyboard',keyboard])]);observation.scrollBase=base;observation.stateName=`${(root?.name??'estado').replace(/ · teclado$/,'')}${keyboard?' · teclado':''} · rolado`;
 }
 const HOTSPOT_LIMIT=80;
 /** Compact interactive candidates kept on the state so the map renders without local evidence files. */
 export function hotspots(observation){return observation.elements.filter(e=>e.actions?.length&&!e.disabled&&e.visible!==false&&e.bounds).slice(0,HOTSPOT_LIMIT).map(e=>({id:e.id,identity:e.identity,name:e.name,actions:e.actions,bounds:e.bounds,sensitive:!!e.sensitive,...(e.label&&e.label!==e.name?{label:e.label}:{}),...(e.resourceId?{resourceId:e.resourceId}:{})}));}
 /** Follow merges: a screen or state folded into another answers to the one it was folded into. */
-const alias=(map,id)=>{for(let hops=0;map?.[id]&&hops<20;hops++)id=map[id];return id;};
+export const alias=(map,id)=>{for(let hops=0;map?.[id]&&hops<20;hops++)id=map[id];return id;};
 /**
  * Place a capture on the map: which screen, which state. `context` is what the navigation says about it
  * (`previous` capture, the `action` and `element` that led here, `scrolledFrom`), see `recognizeScreen`.
@@ -88,8 +90,12 @@ export function recordObservation(graph,observation,run,context={}){
  if(observation.stateOverride)stateId=observation.stateOverride;
  else if(observation.stateKey)stateId=alias(graph.stateAliases,identity(observation,target).stateId);
  else stateId=recognizeState(graph,screen.id,observation,{controls,markers})?.state.id??hash([screen.id,'state',[...controls].sort(),markers,!!observation.keyboard]);
- observation.stateId=stateId;
  let state=graph.states.find(s=>s.id===stateId);
+ // A capture is never written over a state it does not show: when the state chosen above (a scrolled view, the app's own key,
+ // a merge) was recorded without the keyboard and this capture has it up, or the other way round, it is a sibling state of the
+ // same screen. The sibling's id comes from the state it stands beside, so seeing it again lands on it.
+ if(state&&!!state.keyboard!==!!observation.keyboard){const beside=state;stateId=hash([beside.id,'keyboard',!!observation.keyboard]);state=graph.states.find(s=>s.id===stateId);if(!state)observation.stateName=observation.keyboard?`${beside.name} · teclado`:beside.name.replace(/ · teclado$/,'')||beside.name;}
+ observation.stateId=stateId;
  if(!state){const taken=graph.states.filter(s=>s.screenId===screen.id).map(s=>s.name);const plain=observation.stateKey||observation.heading||'Observed state';
   state={id:stateId,screenId:screen.id,name:observation.stateName||(observation.stateKey?(observation.keyboard?`${plain} · teclado`:plain):stateName(markers,{keyboard:observation.keyboard,taken})),stateKey:observation.stateKey??null,description:'',firstSeen:observation.id,lastSeen:observation.id,markers:(observation.stateMarkers??[]).map(m=>Array.isArray(m)?m[0]:m).filter(Boolean),semantic:markers,controls:[...controls].slice(0,150),...(observation.scrollBase?{scrollOf:observation.scrollBase}:{}),...(observation.keyboard?{keyboard:true}:{})};graph.states.push(state);}
  state.lastSeen=observation.id;if(!observation.scrollBase&&!state.viewSig)state.viewSig=viewSignature(observation);
@@ -149,6 +155,14 @@ export function planRoute(graph,{from,to,target,profile,environment='default',pr
   queue.push({state:edge.to,previous:current.state,path:[...current.path,edge.id],cost:current.cost+edge.cost+(edge.version?.fingerprint===version?.fingerprint?0:.5)});}}
  return {found:false,steps:[],reason:'No confirmed compatible route. Explore only the missing section or explicitly revalidate an older route.'};
 }
-/** Accept the short ids and names agents receive in compact responses. */
-export function resolveScreen(graph,ref,target){const value=String(ref??'').trim();if(!value)throw Error('Screen reference required');const pool=graph.screens.filter(s=>!target||s.target===target);const exact=pool.find(s=>s.id===value);if(exact)return exact;let matches=value.length>=6?pool.filter(s=>s.id.startsWith(value)):[];if(!matches.length)matches=pool.filter(s=>s.name?.toLowerCase()===value.toLowerCase());if(matches.length===1)return matches[0];throw Error(matches.length?`Screen reference "${value}" is ambiguous; use its id`:`Unknown screen "${value}"`);}
+/**
+ * What an id, full or short (6+ characters, as compact responses give it), names among `items`: the ones that carry it and the
+ * ones that ids folded by a merge (`aliases`) now answer to. An id an agent or a person kept from before a merge keeps working,
+ * whether it arrives bare or inside a navloom:// link.
+ */
+const byId=(items,aliases,value)=>{const exact=items.find(x=>x.id===value)??items.find(x=>x.id===alias(aliases,value));if(exact)return [exact];if(value.length<6)return [];const ids=new Set(Object.keys(aliases??{}).filter(id=>id.startsWith(value)).map(id=>alias(aliases,id)));return items.filter(x=>x.id.startsWith(value)||ids.has(x.id));};
+/** Accept the short ids and names agents receive in compact responses, and ids of screens merged away. */
+export function resolveScreen(graph,ref,target){const value=String(ref??'').trim();if(!value)throw Error('Screen reference required');const pool=graph.screens.filter(s=>!target||s.target===target);let matches=byId(pool,graph.aliases,value);if(!matches.length)matches=pool.filter(s=>s.name?.toLowerCase()===value.toLowerCase());if(matches.length===1)return matches[0];throw Error(matches.length?`Screen reference "${value}" is ambiguous; use its id`:`Unknown screen "${value}"`);}
+/** A state by id, full or short, following merges like screens do; beside a screen (`screenId`) also by its name there. */
+export function resolveState(graph,ref,screenId){const value=String(ref??'').trim(),pool=graph.states.filter(s=>!screenId||s.screenId===screenId);let matches=value?byId(pool,graph.stateAliases,value):[];if(!matches.length&&screenId)matches=pool.filter(s=>s.name?.toLowerCase()===value.toLowerCase());if(matches.length===1)return matches[0];throw Error(`Unknown or ambiguous state "${value}"`);}
 export function compareRuns(a,b){const old=new Set(a.observations.map(o=>o.stateId)),next=new Set(b.observations.map(o=>o.stateId));return {baseline:a.id,current:b.id,added:[...next].filter(x=>!old.has(x)),revisited:[...next].filter(x=>old.has(x)),notRevisited:[...old].filter(x=>!next.has(x)),removed:[],reviewRequired:true};}

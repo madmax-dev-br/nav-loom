@@ -1,15 +1,17 @@
 import {createServer} from 'node:http';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
-import {writeFile,unlink,open} from 'node:fs/promises';
+import {unlink,readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {Runtime} from './runtime.mjs';
 import {Plugins} from './plugins.mjs';
 import {operations} from './operations.mjs';
+import {acquireLock} from './lock.mjs';
 export async function createService({root,port=4788}){
  const runtime=new Runtime(root),plugins=new Plugins(runtime),ops=operations(runtime,plugins),token=randomBytes(32).toString('hex'),leases=new Map();
  await runtime.store.init();
- const lockPath=join(runtime.store.dir,'service.lock');let lock;try{lock=await open(lockPath,'wx',0o600);await lock.writeFile(String(process.pid));}catch{throw Error('Agent service lock exists. Stop the other service or remove a stale .navloom/service.lock after checking its process.');}
- await runtime.init();
+ const lock=await acquireLock(runtime.store.dir),descriptorPath=join(runtime.store.dir,'runtime.json');
+ // A start that fails after this point (the port is taken, the project does not load) must not leave the lock behind.
+ try{await runtime.init();
  const server=createServer(async(req,res)=>{res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json');const fail=(status,message)=>{res.statusCode=status;res.end(JSON.stringify({error:message}));};try{
  const host=req.headers.host?.split(':')[0];if(!['127.0.0.1','localhost'].includes(host))return fail(403,'Loopback host required');if(req.headers.origin)return fail(403,'Use the authenticated local UI bridge');const supplied=req.headers.authorization?.replace(/^Bearer /,'')??'';if(supplied.length!==token.length||!timingSafeEqual(Buffer.from(supplied),Buffer.from(token)))return fail(401,'Local service token required');
  const url=new URL(req.url,'http://localhost');if(req.method==='GET'&&url.pathname==='/health'){res.end(JSON.stringify({ok:true,version:2}));return;}
@@ -21,7 +23,8 @@ export async function createService({root,port=4788}){
  // External agents get the compact projection; the local interface reads full records.
  const result=owner!=='interface'&&op.brief?await op.brief(full,args):full;res.end(JSON.stringify(result));
  }catch(e){fail(400,e.message);}});
- await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});const address=server.address();await writeFile(join(runtime.store.dir,'runtime.json'),JSON.stringify({port:address.port,token,pid:process.pid,root:runtime.store.root}),{mode:0o600});
- const timer=setInterval(()=>{for(const [owner,last] of leases)if(Date.now()-last>45000){leases.delete(owner);runtime.exclusive(()=>runtime.disconnect(owner)).catch(()=>{});}},10000);timer.unref();
- return {runtime,port:address.port,token,close:async()=>{clearInterval(timer);await runtime.exclusive(()=>runtime.close());await new Promise(resolve=>server.close(resolve));await lock.close();await unlink(lockPath).catch(()=>{});await unlink(join(runtime.store.dir,'runtime.json')).catch(()=>{});}};
+ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});const address=server.address();/* Atomic: the bridge and the MCP read this on every call and must never parse half a descriptor. */await runtime.store.atomic(descriptorPath,JSON.stringify({port:address.port,token,pid:process.pid,root:runtime.store.root}));
+ const timer=setInterval(()=>{lock.beat();for(const [owner,last] of leases)if(Date.now()-last>45000){leases.delete(owner);runtime.exclusive(()=>runtime.disconnect(owner)).catch(()=>{});}},10000);timer.unref();
+ return {runtime,port:address.port,token,close:async()=>{clearInterval(timer);await runtime.exclusive(()=>runtime.close());await new Promise(resolve=>server.close(resolve));if((await readFile(descriptorPath,'utf8').catch(()=>'')).includes(token))await unlink(descriptorPath).catch(()=>{});await lock.release();}};
+ }catch(error){await runtime.close().catch(()=>{});await lock.release();throw error;}
 }

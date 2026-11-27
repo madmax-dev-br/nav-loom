@@ -40,6 +40,7 @@ class SimDevice{
   if(cmd.startsWith('shell dumpsys activity activities')&&cmd.includes('uiautomator dump'))return focus()+'__NAVLOOM_SPLIT__\n'+this.xml();
   if(cmd.startsWith('shell dumpsys activity activities'))return focus();
   if(cmd.startsWith('shell uiautomator dump'))return this.xml();
+  if(cmd.startsWith('shell dumpsys input_method'))return '  mInputShown=false\n';
   if(cmd==='exec-out screencap -p'){const color={home:[240,236,255],products:[230,245,240],product:this.favorite?[200,40,40]:[255,245,230],pix:[230,236,255]}[this.screen]??[0,0,0];const pixels=new Uint8Array(60*120*4);for(let i=0;i<60*120;i++){pixels[i*4]=color[0];pixels[i*4+1]=color[1];pixels[i*4+2]=color[2];pixels[i*4+3]=255;}return encodePng({width:60,height:120,pixels});}
   if(cmd===`shell pidof ${PKG}`)return '4242\n';
   if(cmd.startsWith('shell pid=$(pidof')||cmd.startsWith('logcat -d -v epoch'))return this.logs.join('\n')+'\n';

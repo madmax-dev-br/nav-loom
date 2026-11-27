@@ -5,6 +5,9 @@ import {MODES} from './review.mjs';
 import {KINDS,scriptSchema} from './harness.mjs';
 import {leanObservation,leanStep,leanRun,leanFrontier,leanExplore} from './lean.mjs';
 import {briefObservation,briefStep,briefStart,briefMove,briefRun,briefMemory,briefFrontier} from './brief.mjs';
+import {resolveScreen,resolveState,alias} from './graph.mjs';
+import {similarScreens} from './recognize.mjs';
+import {parseScreenLink} from '../lib/screen-link.mjs';
 const runId=z.string().uuid();
 // Every tool definition travels to the model on every turn: descriptions are short and field descriptions rare.
 // What an external agent receives: `compact` is the short projection (labels, short ids, known exits), `digest` the text
@@ -16,16 +19,47 @@ export const TIERS={
  core:['memory','start','observe','step','goto','explore','frontier','screen','run','finish','pause','resume','ask','answer','help','organize','merge','harness','harness_propose','logs','evidence','status'],
  extended:['memory','capabilities','start','observe','step','goto','explore','probe','frontier','screen','transition','run','finish','review','pause','resume','reset','route','replay','ask','answer','help','forget_help','dismiss_request','annotate','describe','organize','merge','similar','apis','group_flow','harness','harness_propose','logs','evidence','deeplinks','status','compare','search_source','source','source_tree','link_suggestions','link','export_map'],
 };
+/**
+ * A `navloom://screen/<id>[?state=<id>]` link, copied by a person from a screen of the interface and pasted to the agent,
+ * stands for that screen (or state) wherever an operation takes one. It is resolved here, once, for every operation: an
+ * argument that is a link (alone, however wrapped) becomes the id; a link inside a sentence is left as text. Under a state
+ * argument (`state`, `stateId`, or `id`/`into`/`from` beside kind=state) it gives the state, elsewhere the screen, and a
+ * link to a state also fills the operation's own state argument (`state` or `stateId`) when it has one. Merged ids are followed by their aliases.
+ */
+const LINK=/^[\s<("'`[*]*navloom:\/\/screen\/\S+\s*$/i,STATE_ARGS=new Set(['state','stateId']),BY_KIND=new Set(['id','into','from']),TYPED=new Set(['value','url']);
+// What is typed into the app or opened in it (`value`, `url` of an action) is never a reference to the map.
+const hasLink=(value,key)=>typeof value==='string'?!TYPED.has(key)&&LINK.test(value):Array.isArray(value)?value.some(item=>hasLink(item,key)):!!value&&typeof value==='object'&&Object.entries(value).some(([k,v])=>hasLink(v,k));
+// Merged ids are followed by the same trail (`alias`, graph.mjs) that resolveScreen/resolveState follow for bare ids: a link and the id inside it name the same thing.
+export function linkTarget(graph,link,want='screen'){
+ const stateId=link.state&&alias(graph.stateAliases,link.state),state=stateId&&graph.states.find(s=>s.id===stateId),screen=graph.screens.find(s=>s.id===alias(graph.aliases,link.screen))??(state&&graph.screens.find(s=>s.id===state.screenId));
+ if(want==='state'){if(!link.state)throw Error(`This link names the screen ${screen?`"${screen.name}"`:link.screen.slice(0,8)}, not one of its states: pass a state id (navloom_screen lists them)`);if(!state)throw Error(`The linked state ${link.state.slice(0,8)} no longer exists in the map${screen?`; its screen "${screen.name}" does (navloom_screen lists its states)`:''}`);return state.id;}
+ if(!screen)throw Error(`The linked screen ${link.screen.slice(0,8)} no longer exists in the map (it was removed or the map was rebuilt, not merged: merges are followed). navloom_memory lists the current screens`);
+ return screen.id;
+}
+export function resolveLinks(graph,args,shape={}){
+ const walk=(value,key,owner)=>{
+  if(typeof value==='string'){const link=hasLink(value,key)&&parseScreenLink(value);return link?linkTarget(graph,link,STATE_ARGS.has(key)||(owner?.kind==='state'&&BY_KIND.has(key))?'state':'screen'):value;}
+  if(Array.isArray(value))return value.map(item=>walk(item,key,owner));
+  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,walk(v,k,value)]));
+  return value;};
+ const out=walk(args);
+ // The person linked one state of the screen: an operation that can aim at a state (goto, screen, ask) aims at it, by whichever state argument it has.
+ for(const key of ['screen','screenId']){const link=typeof args?.[key]==='string'&&LINK.test(args[key])&&parseScreenLink(args[key]),slots=key==='screen'?['state','stateId']:['stateId','state'],slot=slots.find(s=>s in shape);if(link?.state&&slot&&slots.every(s=>out[s]===undefined)){const id=alias(graph.stateAliases,link.state);if(graph.states.some(s=>s.id===id&&s.screenId===out[key]))out[slot]=id;}}
+ return out;
+}
 // `call` returns the full record; `brief` shapes it for external agents by the requested `detail`. `ui` operations are never exposed over MCP.
 export function operations(runtime,plugins){const graph=()=>runtime.store.graph();
+ // What whoever is about to change a screen needs besides its context: its states by id and the screens it may be a copy of.
+ const editable=async(text,ref)=>{const g=await graph(),screen=resolveScreen(g,ref),states=g.states.filter(s=>s.screenId===screen.id),twins=similarScreens(g,{target:screen.target,min:.6}).filter(p=>p.a===screen.id||p.b===screen.id).slice(0,4);
+  return [text,states.length?`Estados (id): ${states.slice(0,20).map(s=>`${s.name} ${s.id.slice(0,8)}`).join(', ')}`:'',twins.length?`Parece com: ${twins.map(p=>{const i=p.a===screen.id?1:0;return `${p.names[i]} ${[p.a,p.b][i].slice(0,8)} (${p.score})`;}).join(', ')}. A mesma tela: navloom_merge {into, from}; é um estado da outra: navloom_merge {into, from, as:"state"}.`:''].filter(Boolean).join('\n');};
  const view=(compact,digest)=>async(full,args)=>args.detail==='full'?full:args.detail==='digest'&&digest?digest(full,args):compact(full,args);
- return {
+ const table={
  evidence:{description:'Screenshot (downscaled JPEG) or observation JSON by evidence path, when the digest is not enough.',schema:z.object({path:z.string().regex(/^(evidence\/[\w-]+\.(png|jpg|json)|map\/states\/[\w-]+\.(png|jpg))$/),maxWidth:z.number().int().min(160).max(2000).optional(),quality:z.number().int().min(10).max(95).default(60),format:z.enum(['jpeg','png']).default('jpeg')}),call:args=>runtime.evidence(args)},
  status:{description:'Counts, endpoints, pending help, runs, active mission. detail=full: the whole graph.',schema:z.object({detail}),call:(args,owner)=>runtime.status({detail:owner==='interface'||args.detail==='full'?'full':'compact'})},
  configure:{description:'Save the project setup (navloom.yaml). Secrets are environment variable names.',schema:z.object({config:configSchema}),call:({config})=>runtime.configure(config)},
  capabilities:{description:'Check device/app resources of a target before a mission.',schema:z.object({target:id}),call:({target})=>runtime.capabilities(target)},
  memory:{description:'Read first: screens, connections, API calls, entry points, response variants, deeplinks, flows, duplicates, API doubts, help, runs. digests=true: state graphs.',schema:z.object({detail,digests:z.boolean().default(false)}),call:()=>runtime.memory({detail:'full'}),brief:(full,args)=>args.detail==='full'?full:args.digests||args.detail==='digest'?runtime.memory({detail:'compact',digests:true}):briefMemory(full)},
- screen:{description:'One screen by name or id: how to get there, deeplinks, loads, what its actions do and on which answer, untried controls. detail=full adds digests.',schema:z.object({screen:z.string().optional(),screenId:z.string().optional(),detail}),call:({screen,screenId,detail:d})=>{const ref=screen??screenId;if(!ref)throw Error('Provide a screen name or id');return d==='full'?runtime.screenDetail({screen:ref}):runtime.screenContext({screen:ref});}},
+ screen:{description:'One screen by name, id or link (state: show that state): states, how to get there, deeplinks, loads, what its actions do and on which answer, untried controls, lookalikes. detail=full adds digests.',schema:z.object({screen:z.string().optional(),screenId:z.string().optional(),state:z.string().optional(),detail}),call:async({screen,screenId,state,detail:d})=>{const ref=screen??screenId??(state&&resolveState(await graph(),state).screenId);if(!ref)throw Error('Provide a screen name or id');return d==='full'?runtime.screenDetail({screen:ref,state}):runtime.screenContext({screen:ref,state}).then(text=>editable(text,ref));}},
  transition:{description:'One transition: summary, description, API calls, text diff, changed region.',schema:z.object({id:z.string(),detail}),call:args=>runtime.transition(args)},
  start:{description:'Start a bounded mission; returns the entry screen. mode: record (a person approves what it maps), validate (walks the map, reports differences), walk (navigate only).',schema:missionSchema.extend({detail}),call:({detail:_,...args},owner)=>runtime.start(args,owner),brief:view(run=>briefStart(run,runtime.store),async run=>leanRun(run,await graph()))},
  observe:{description:'Capture the current screen and its actions; not needed after step/goto. detail=digest: text graph with pixel boxes and ids.',schema:z.object({runId,detail}),call:({runId})=>runtime.observe(runId),brief:view(async o=>briefObservation(o,await graph()),o=>leanObservation(o))},
@@ -49,7 +83,7 @@ export function operations(runtime,plugins){const graph=()=>runtime.store.graph(
  annotate:{description:'Describe a screen in business terms (purpose, information, actions, rules). Not a test log. Code links go through link.',schema:z.object({screenId:z.string(),name:z.string().optional(),description:z.string(),evidence:z.array(z.string().uuid()).default([])}),call:args=>runtime.annotate(args)},
  organize:{description:'Name/describe screens, group flows and set an endpoint\'s screen (apiDoubts) in one call. Business purpose, not test steps.',schema:z.object({screens:z.array(z.object({id:z.string(),name:z.string().optional(),description:z.string().optional()})).max(100).default([]),flows:z.array(z.object({id,name:z.string(),description:z.string().default(''),screenIds:z.array(z.string()).min(1),runIds:z.array(runId).default([])})).max(30).default([]),apis:z.array(z.object({endpoint:z.string(),screen:z.string(),role:z.enum(['load','action']).default('load'),via:z.string().optional()})).default([])}),call:args=>runtime.organize(args)},
  apis:{description:'Say who an endpoint belongs to when it was put on the wrong screen (see apiDoubts): load of a screen, or action of a screen (via=action name). Re-places every recorded call from evidence. remove=true drops the rule.',schema:z.object({endpoint:z.string(),screen:z.string().optional(),role:z.enum(['load','action']).default('load'),via:z.string().optional(),remove:z.boolean().default(false)}),call:args=>runtime.apiOwner(args)},
- merge:{description:'Fold screens recorded twice (kind=state: states) into `into`; all that pointed at `from` follows. In a record mission it waits for approval.',schema:z.object({into:z.string(),from:z.array(z.string()).min(1),kind:z.enum(['screen','state']).default('screen')}),call:args=>runtime.merge(args)},
+ merge:{description:'Fold screens recorded twice (kind=state: states) into `into`; all that pointed at `from` follows. as=state: `from` screens become states of screen `into`. In a record mission it waits for approval.',schema:z.object({into:z.string(),from:z.array(z.string()).min(1),kind:z.enum(['screen','state']).default('screen'),as:z.enum(['state']).optional()}),call:args=>runtime.merge(args)},
  similar:{description:'Pairs of screens that look alike (merge candidates), with the ids/texts they share.',schema:z.object({target:id.optional(),min:z.number().min(.3).max(.95).default(.55)}),call:args=>runtime.similar(args)},
  harness:{description:'Learned scripts and each kind\'s contract. suggest=screen writes the screen-identity script from the map, for harness_propose.',schema:z.object({suggest:z.enum(['screen']).optional()}),call:args=>args.suggest?runtime.suggestScreenScript({}):({kinds:Object.fromEntries(Object.entries(KINDS).map(([kind,k])=>[kind,{input:k.input,output:k.output}])),contract:'code defines `function run(input)` returning JSON; pure, no imports, no I/O. Include samples [{input, expect}] that prove it.',scripts:runtime.harness.list()}),brief:data=>data.scripts===undefined?data:({...data,scripts:data.scripts.map(s=>({id:s.id,kind:s.kind,name:s.name,status:s.status,revision:s.revision,stats:s.stats,...(s.results?.some(r=>!r.ok)?{failedSamples:s.results.map((r,i)=>r.ok?null:{sample:i,got:r.got,error:r.error}).filter(Boolean)}:{})}))})},
  harness_propose:{description:'Register a learned script or revision. A person approves it; it activates only if all its samples match.',schema:scriptSchema,call:(args,owner)=>runtime.harness.propose(args,owner==='interface'?'user':'agent'),brief:s=>({id:s.id,status:s.status,revision:s.revision,next:'Waiting for approval in the Navloom interface.'})},
@@ -78,4 +112,7 @@ export function operations(runtime,plugins){const graph=()=>runtime.store.graph(
  plugin_fields:{description:'Set plugin extension fields for a screen (user-pinned values are kept).',schema:z.object({plugin:id,screenId:z.string(),values:z.record(z.unknown())}),call:(args,owner)=>plugins.fields({...args,actor:owner==='interface'?'user':'agent'})},
  plugin_invoke:{description:'Call an active plugin tool.',schema:z.object({plugin:id,tool:z.string(),input:z.record(z.unknown()).default({}),runId:runId.optional()}),call:args=>plugins.invoke(args)},
  pin:{ui:true,description:'Pin or unpin a presentation preference.',schema:z.object({key:z.string(),value:z.boolean()}),call:({key,value})=>plugins.pin(key,value)}
- };}
+ };
+ // Screen links are resolved in this one place, before any operation sees its arguments.
+ for(const op of Object.values(table)){const call=op.call;op.call=(args,owner)=>hasLink(args)?graph().then(g=>call(resolveLinks(g,args,op.schema.shape),owner)):call(args,owner);}
+ return table;}
